@@ -1,0 +1,169 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --accent: #007AFF;
+    --accent-light: #3395FF;
+    --accent-dark: #0056B3;
+    --background: #F5F5F7;
+    --surface: #FFFFFF;
+    --surface-elevated: #FFFFFF;
+    --surface-overlay: rgba(0, 0, 0, 0.4);
+    --foreground: #1D1D1F;
+    --foreground-muted: #6E6E73;
+    --foreground-inverse: #FFFFFF;
+    --border: rgba(0, 0, 0, 0.1);
+    --danger: #FF3B30;
+    --success: #34C759;
+    --warning: #FF9500;
+    --ring: var(--accent);
+  }
+
+  .dark {
+    --accent: #0A84FF;
+    --accent-light: #409CFF;
+    --accent-dark: #0066CC;
+    --background: #000000;
+    --surface: #1C1C1E;
+    --surface-elevated: #2C2C2E;
+    --surface-overlay: rgba(0, 0, 0, 0.6);
+    --foreground: #F5F5F7;
+    --foreground-muted: #8E8E93;
+    --foreground-inverse: #000000;
+    --border: rgba(255, 255, 255, 0.1);
+    --danger: #FF453A;
+    --success: #30D158;
+    --warning: #FF9F0A;
+    --ring: var(--accent);
+  }
+
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "kern" 1, "liga" 1;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--foreground-muted);
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-xl px-5 py-2.5 text-sm font-medium text-white transition-all duration-200;
+    background-color: var(--accent);
+  }
+  .btn-primary:hover {
+    background-color: var(--accent-dark);
+    transform: translateY(-1px);
+  }
+  .btn-primary:active {
+    transform: translateY(0);
+  }
+  .btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center rounded-xl px-5 py-2.5 text-sm font-medium transition-all duration-200;
+    background-color: var(--surface-elevated);
+    color: var(--accent);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover {
+    background-color: var(--accent);
+    color: white;
+  }
+
+  .card {
+    @apply rounded-2xl p-6 transition-shadow duration-200;
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+  }
+  .card:hover {
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+  }
+
+  .input {
+    @apply w-full rounded-xl px-4 py-3 text-sm outline-none transition-all duration-200;
+    background-color: var(--surface-elevated);
+    color: var(--foreground);
+    border: 1px solid var(--border);
+  }
+  .input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.1);
+  }
+  .input::placeholder {
+    color: var(--foreground-muted);
+  }
+
+  .label {
+    @apply block text-xs font-medium uppercase tracking-wide mb-1.5;
+    color: var(--foreground-muted);
+  }
+
+  .nav-item {
+    @apply flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200;
+    color: var(--foreground-muted);
+  }
+  .nav-item:hover {
+    background-color: var(--surface-elevated);
+    color: var(--foreground);
+  }
+  .nav-item.active {
+    background-color: var(--accent);
+    color: white;
+  }
+
+  .section-title {
+    @apply text-2xl font-semibold tracking-tight;
+    color: var(--foreground);
+  }
+
+  .empty-state {
+    @apply flex flex-col items-center justify-center py-16 text-center;
+  }
+  .empty-state-icon {
+    @apply mb-4 rounded-full p-4;
+    background-color: var(--surface-elevated);
+    color: var(--foreground-muted);
+  }
+}
+
+/* Leaflet dark mode overrides */
+.dark .leaflet-container {
+  background: #1C1C1E;
+}
+.dark .leaflet-popup-content-wrapper,
+.dark .leaflet-popup-tip {
+  background: #2C2C2E;
+  color: #F5F5F7;
+}
+
+.leaflet-container {
+  height: 100% !important;
+  width: 100% !important;
+}
