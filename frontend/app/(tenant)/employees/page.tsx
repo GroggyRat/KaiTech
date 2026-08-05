@@ -480,7 +480,7 @@ function EditEmployeeModal({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="label">Full Name</label>
-            <input name="full_name" className="input" defaultValue={employee.profile?.full_name} required />
+            <input name="full_name" className="input" defaultValue={employee.profile?.full_name || ""} required />
           </div>
           <div>
             <label className="label">Email</label>

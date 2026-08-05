@@ -18,7 +18,7 @@ export default function ConsoleBillingPage() {
 
   const loadData = async () => {
     const { data: tData } = await supabase.from("tenants").select("*").eq("agency_id", user!.agency_id || "00000000-0000-0000-0000-000000000001");
-    const { data: iData } = await supabase.from("tenant_invoices").select("*").in("tenant_id", (tData || []).map((t) => t.id)).order("created_at", { ascending: false });
+    const { data: iData } = await supabase.from("tenant_invoices").select("*").in("tenant_id", (tData || []).map((t: Tenant) => t.id)).order("created_at", { ascending: false });
     setTenants(tData || []);
     setInvoices(iData || []);
   };

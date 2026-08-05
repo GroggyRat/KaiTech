@@ -13,6 +13,10 @@ export default function ConsoleTenantsPage() {
   const [plans, setPlans] = useState<PlanTier[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [logoError, setLogoError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const supabase = createClient();
 
   useEffect(() => { if (user?.is_agency_superadmin) loadData(); }, [user]);
@@ -24,10 +28,31 @@ export default function ConsoleTenantsPage() {
     setPlans(pData || []);
   };
 
+  const handleLogoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLogoError(null);
+
+    if (!["image/png", "image/jpeg", "image/svg+xml", "image/webp"].includes(file.type)) {
+      setLogoError("Please choose a PNG, JPG, WebP, or SVG image.");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setLogoError("Image must be under 2MB.");
+      return;
+    }
+
+    setLogoFile(file);
+    setLogoPreview(URL.createObjectURL(file));
+  };
+
   const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setIsSaving(true);
+    setLogoError(null);
+
     const form = new FormData(e.currentTarget);
-    const payload = {
+    const payload: Record<string, any> = {
       agency_id: user!.agency_id || "00000000-0000-0000-0000-000000000001",
       name: form.get("name") as string,
       contact_email: form.get("contact_email") as string,
@@ -39,6 +64,24 @@ export default function ConsoleTenantsPage() {
       pay_period_frequency: form.get("pay_period_frequency") as string,
       accent_color: form.get("accent_color") as string,
     };
+
+    if (logoFile) {
+      const ext = logoFile.name.split(".").pop();
+      const path = `${crypto.randomUUID()}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from("tenant-logos")
+        .upload(path, logoFile, { upsert: true });
+
+      if (uploadError) {
+        setLogoError(`Logo upload failed: ${uploadError.message}`);
+        setIsSaving(false);
+        return;
+      }
+
+      const { data: publicUrlData } = supabase.storage.from("tenant-logos").getPublicUrl(path);
+      payload.logo_url = publicUrlData.publicUrl;
+    }
+
     if (editingTenant) {
       await supabase.from("tenants").update(payload).eq("id", editingTenant.id);
     } else {
@@ -46,6 +89,9 @@ export default function ConsoleTenantsPage() {
     }
     setShowModal(false);
     setEditingTenant(null);
+    setLogoFile(null);
+    setLogoPreview(null);
+    setIsSaving(false);
     loadData();
   };
 
@@ -68,7 +114,7 @@ export default function ConsoleTenantsPage() {
     <div className="space-y-6 animate-slide-up">
       <div className="flex items-center justify-between">
         <h1 className="section-title">Tenants</h1>
-        <button onClick={() => { setEditingTenant(null); setShowModal(true); }} className="btn-primary" style={{ backgroundColor: "#FF6B35" }}>
+        <button onClick={() => { setEditingTenant(null); setLogoFile(null); setLogoPreview(null); setLogoError(null); setShowModal(true); }} className="btn-primary" style={{ backgroundColor: "#FF6B35" }}>
           <Plus className="h-4 w-4 mr-2" />Add Tenant
         </button>
       </div>
@@ -113,7 +159,7 @@ export default function ConsoleTenantsPage() {
                   <td className="py-3 px-4">
                     <div className="flex items-center justify-end gap-1">
                       <button onClick={() => handleImpersonate(tenant.id)} className="p-1.5 rounded-lg hover:bg-[var(--surface-elevated)] text-[var(--accent)]" title="Impersonate"><Eye className="h-4 w-4" /></button>
-                      <button onClick={() => { setEditingTenant(tenant); setShowModal(true); }} className="p-1.5 rounded-lg hover:bg-[var(--surface-elevated)]"><Pencil className="h-4 w-4 text-[var(--foreground-muted)]" /></button>
+                      <button onClick={() => { setEditingTenant(tenant); setLogoFile(null); setLogoPreview(tenant.logo_url); setLogoError(null); setShowModal(true); }} className="p-1.5 rounded-lg hover:bg-[var(--surface-elevated)]"><Pencil className="h-4 w-4 text-[var(--foreground-muted)]" /></button>
                       {tenant.is_suspended ? (
                         <button onClick={() => handleSuspend(tenant.id, false)} className="p-1.5 rounded-lg hover:bg-[var(--surface-elevated)] text-[var(--success)]"><RotateCcw className="h-4 w-4" /></button>
                       ) : (
@@ -133,6 +179,24 @@ export default function ConsoleTenantsPage() {
           <div className="w-full max-w-lg rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-6 animate-slide-up max-h-[90vh] overflow-y-auto">
             <h2 className="text-lg font-semibold mb-4">{editingTenant ? "Edit Tenant" : "Create Tenant"}</h2>
             <form onSubmit={handleSave} className="space-y-4">
+              <div>
+                <label className="label">Logo</label>
+                <div className="flex items-center gap-3">
+                  {logoPreview ? (
+                    <img src={logoPreview} alt="" className="h-14 w-14 rounded-xl object-contain bg-white border border-[var(--border)]" />
+                  ) : (
+                    <div className="h-14 w-14 rounded-xl flex items-center justify-center text-lg font-medium text-white shrink-0" style={{ backgroundColor: editingTenant?.accent_color || "#007AFF" }}>
+                      {editingTenant?.name ? editingTenant.name[0].toUpperCase() : "?"}
+                    </div>
+                  )}
+                  <label className="btn-secondary cursor-pointer">
+                    Choose Image
+                    <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={handleLogoSelect} className="hidden" />
+                  </label>
+                </div>
+                {logoError && <p className="text-xs text-[var(--danger)] mt-2">{logoError}</p>}
+                <p className="text-xs text-[var(--foreground-muted)] mt-1">PNG, JPG, WebP, or SVG. Under 2MB.</p>
+              </div>
               <div><label className="label">Tenant Name</label><input name="name" defaultValue={editingTenant?.name} className="input" required /></div>
               <div><label className="label">Contact Email</label><input name="contact_email" type="email" defaultValue={editingTenant?.contact_email || ""} className="input" /></div>
               <div className="grid grid-cols-2 gap-4">
@@ -149,8 +213,8 @@ export default function ConsoleTenantsPage() {
                 <div><label className="label">Pay Frequency</label><select name="pay_period_frequency" defaultValue={editingTenant?.pay_period_frequency || "fortnightly"} className="input"><option value="weekly">Weekly</option><option value="fortnightly">Fortnightly</option><option value="monthly">Monthly</option></select></div>
               </div>
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => { setShowModal(false); setEditingTenant(null); }} className="btn-secondary flex-1">Cancel</button>
-                <button type="submit" className="btn-primary flex-1" style={{ backgroundColor: "#FF6B35" }}>{editingTenant ? "Save Changes" : "Create Tenant"}</button>
+                <button type="button" onClick={() => { setShowModal(false); setEditingTenant(null); setLogoFile(null); setLogoPreview(null); setLogoError(null); }} className="btn-secondary flex-1">Cancel</button>
+                <button type="submit" disabled={isSaving} className="btn-primary flex-1" style={{ backgroundColor: "#FF6B35" }}>{isSaving ? "Saving..." : editingTenant ? "Save Changes" : "Create Tenant"}</button>
               </div>
             </form>
           </div>

@@ -43,12 +43,16 @@ export interface Employee {
   tenant_id: string;
   profile_id: string;
   department_id: string | null;
+  reports_to_id: string | null;
   employee_code: string | null;
   hourly_rate: number;
   yearly_rate: number;
   employment_type: 'full_time' | 'part_time' | 'contract';
   start_date: string;
   end_date: string | null;
+  fnpf_number: string | null;
+  bank_name: string | null;
+  bank_account_number: string | null;
   is_active: boolean;
   profile?: Profile;
   department?: Department;
@@ -109,6 +113,7 @@ export interface GeofenceViolation {
   recorded_at: string;
   acknowledged_by: string | null;
   acknowledged_at: string | null;
+  employee?: Employee;
 }
 
 export interface Timesheet {
@@ -279,6 +284,7 @@ export interface EmployeeDocument {
   expiry_date: string | null;
   uploaded_by: string;
   created_at: string;
+  employee?: Employee;
 }
 
 export interface PlanTier {
@@ -302,6 +308,7 @@ export interface TenantInvoice {
   status: 'pending' | 'paid' | 'overdue';
   paid_at: string | null;
   notes: string | null;
+  created_at: string;
 }
 
 export interface Agency {

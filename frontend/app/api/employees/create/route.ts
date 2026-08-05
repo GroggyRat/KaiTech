@@ -22,7 +22,18 @@ function generateTempPassword(): string {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { tenantId, email, fullName, role, hourlyRate, departmentId, startDate } = body;
+  const {
+    tenantId,
+    email,
+    fullName,
+    role,
+    hourlyRate,
+    departmentId,
+    startDate,
+    fnpfNumber,
+    bankName,
+    bankAccountNumber,
+  } = body;
 
   if (!tenantId || !email || !fullName || !role || hourlyRate === undefined || !startDate) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -118,6 +129,9 @@ export async function POST(request: NextRequest) {
     department_id: departmentId || null,
     hourly_rate: hourlyRate,
     start_date: startDate,
+    fnpf_number: fnpfNumber || null,
+    bank_name: bankName || null,
+    bank_account_number: bankAccountNumber || null,
   });
 
   if (empError) {

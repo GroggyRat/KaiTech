@@ -62,7 +62,7 @@ const employeeNav = [
 
 export function Header() {
   const { tenant, role, switchTenant, roles } = useTenant();
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const { theme, resolvedTheme, setTheme } = useTheme();
   const [showTenantMenu, setShowTenantMenu] = useState(false);
   const [showThemeMenu, setShowThemeMenu] = useState(false);
