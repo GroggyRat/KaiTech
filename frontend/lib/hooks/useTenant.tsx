@@ -22,7 +22,7 @@ const TenantContext = createContext<TenantContextType>({
   switchTenant: () => {},
 });
 
-export function TenantProvider({ children }: { children: React.ReactNode }) {
+export function TenantProvider({ children }: { children: React.ReactNode }): React.ReactElement {
   const [tenant, setTenantState] = useState<Tenant | null>(null);
   const [role, setRole] = useState<AppRole | null>(null);
   const [roles, setRoles] = useState<UserTenantRole[]>([]);

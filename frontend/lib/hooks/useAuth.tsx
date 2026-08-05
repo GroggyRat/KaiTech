@@ -20,7 +20,7 @@ const AuthContext = createContext<AuthContextType>({
   refresh: async () => {},
 });
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({ children }: { children: React.ReactNode }): React.ReactElement {
   const [user, setUser] = useState<Profile | null>(null);
   const [roles, setRoles] = useState<UserTenantRole[]>([]);
   const [isLoading, setIsLoading] = useState(true);
