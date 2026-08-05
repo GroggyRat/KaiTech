@@ -58,7 +58,7 @@ export default function OrgChartPage() {
     );
     const roots: EmployeeNode[] = [];
 
-    for (const emp of byId.values()) {
+   for (const emp of Array.from(byId.values())) {
       if (emp.reports_to_id && byId.has(emp.reports_to_id)) {
         byId.get(emp.reports_to_id)!.children.push(emp);
       } else {
