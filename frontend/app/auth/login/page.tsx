@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
+import Image from "next/image";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -25,8 +26,15 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center p-4 bg-[var(--background)]">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-semibold tracking-tight">KaiWorkforce</h1>
-          <p className="text-sm text-[var(--foreground-muted)] mt-1">Sign in to your account</p>
+          <Image
+            src="/logo.png"
+            alt="Kai Workforce"
+            width={260}
+            height={90}
+            className="mx-auto h-14 w-auto"
+            priority
+          />
+          <p className="text-sm text-[var(--foreground-muted)] mt-2">Sign in to your account</p>
         </div>
         <form onSubmit={handleLogin} className="space-y-4">
           {error && (
