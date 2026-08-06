@@ -27,7 +27,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <Image
-            src="/logo.png"
+            src="/kaiworkforce-logo-transparent.png"
             alt="Kai Workforce"
             width={260}
             height={90}
