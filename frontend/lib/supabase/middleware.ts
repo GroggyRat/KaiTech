@@ -36,18 +36,17 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
+  // FIX: Use getSession() instead of getUser() to bypass HS256/ES256 JWT verification bug.
+  // getSession() reads the user from cookies locally without making a network request.
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    data: { session },
+  } = await supabase.auth.getSession();
+  const user = session?.user;
 
   const path = request.nextUrl.pathname;
   const isPublicPath = PUBLIC_PATHS.some((p) => path === p || path === p + "/");
   const isApiRoute = path.startsWith("/api/");
 
-  // No valid session (new browser/device, expired session, logged out,
-  // truly fresh incognito, etc.) — force login instead of silently
-  // rendering the app shell with no data behind it. API routes handle
-  // their own auth and should return JSON, not a redirect.
   if (!user && !isPublicPath && !isApiRoute) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/auth/login";
@@ -55,8 +54,6 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Already logged in and trying to view the login page — send them
-  // straight into the app instead.
   if (user && isPublicPath) {
     const homeUrl = request.nextUrl.clone();
     homeUrl.pathname = "/";
