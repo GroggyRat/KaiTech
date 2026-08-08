@@ -21,6 +21,7 @@ import {
   Network,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { featureForRoute } from "@/lib/features";
 
 const adminNav = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -57,11 +58,18 @@ const employeeNav = [
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { tenant, role } = useTenant();
+  const { tenant, role, hasFeature } = useTenant();
   const { signOut, user } = useAuth();
 
-  const navItems =
+  const baseNav =
     role === "admin" ? adminNav : role === "manager" ? managerNav : employeeNav;
+
+  // Dashboard/Employees/Settings have no feature key (core, always on).
+  // Everything else is hidden the moment its tenant feature is off.
+  const navItems = baseNav.filter((item) => {
+    const feature = featureForRoute(item.href);
+    return !feature || hasFeature(feature.key);
+  });
 
   return (
     <aside className="hidden lg:flex flex-col w-64 h-screen sticky top-0 border-r border-[var(--border)] bg-[var(--surface)]">

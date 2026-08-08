@@ -18,8 +18,11 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="min-h-screen bg-[var(--background)]">
-        {children}
+      <body className="min-h-screen bg-[var(--background)] flex flex-col">
+        <div className="flex-1">{children}</div>
+        <footer className="py-4 text-center text-xs text-[var(--foreground-muted)]">
+          Made by a Human :)
+        </footer>
       </body>
     </html>
   );

@@ -151,6 +151,26 @@
     background-color: var(--surface-elevated);
     color: var(--foreground-muted);
   }
+
+  /* iOS-style toggle switch */
+  .switch {
+    @apply relative inline-flex h-[26px] w-[44px] shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ease-in-out;
+    background-color: var(--border);
+  }
+  .switch[data-on="true"] {
+    background-color: var(--success);
+  }
+  .switch:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .switch-thumb {
+    @apply pointer-events-none inline-block h-[22px] w-[22px] transform rounded-full bg-white shadow-sm transition-transform duration-200 ease-in-out;
+    transform: translateX(2px);
+  }
+  .switch[data-on="true"] .switch-thumb {
+    transform: translateX(20px);
+  }
 }
 
 /* Leaflet dark mode overrides */

@@ -11,6 +11,12 @@ interface TenantContextType {
   isLoading: boolean;
   setTenant: (tenantId: string) => void;
   switchTenant: (tenantId: string) => void;
+  /**
+   * Whether a toggleable module is enabled for the current tenant.
+   * Defaults to true while still loading and for any feature key
+   * with no row yet, so the UI never flashes "locked" incorrectly.
+   */
+  hasFeature: (featureKey: string) => boolean;
 }
 
 const TenantContext = createContext<TenantContextType>({
@@ -20,12 +26,14 @@ const TenantContext = createContext<TenantContextType>({
   isLoading: true,
   setTenant: () => {},
   switchTenant: () => {},
+  hasFeature: () => true,
 });
 
 export function TenantProvider({ children }: { children: React.ReactNode }): React.ReactElement {
   const [tenant, setTenantState] = useState<Tenant | null>(null);
   const [role, setRole] = useState<AppRole | null>(null);
   const [roles, setRoles] = useState<UserTenantRole[]>([]);
+  const [disabledFeatures, setDisabledFeatures] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(true);
   const supabase = createClient();
 
@@ -81,9 +89,19 @@ export function TenantProvider({ children }: { children: React.ReactNode }): Rea
         .eq("tenant_id", tenantId)
         .single();
       setRole(roleData?.role || null);
+
+      const { data: featureData } = await supabase
+        .from("tenant_features")
+        .select("feature_key, is_enabled")
+        .eq("tenant_id", tenantId);
+      setDisabledFeatures(
+        new Set((featureData || []).filter((f) => !f.is_enabled).map((f) => f.feature_key))
+      );
     }
     setIsLoading(false);
   };
+
+  const hasFeature = (featureKey: string) => !disabledFeatures.has(featureKey);
 
   useEffect(() => {
     loadTenant();
@@ -100,7 +118,9 @@ export function TenantProvider({ children }: { children: React.ReactNode }): Rea
   };
 
   return (
-    <TenantContext.Provider value={{ tenant, role, roles, isLoading, setTenant, switchTenant }}>
+    <TenantContext.Provider
+      value={{ tenant, role, roles, isLoading, setTenant, switchTenant, hasFeature }}
+    >
       {children}
     </TenantContext.Provider>
   );

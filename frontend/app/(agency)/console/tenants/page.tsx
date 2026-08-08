@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { createClient } from "@/lib/supabase/client";
-import { Plus, Pencil, Ban, RotateCcw, Eye } from "lucide-react";
+import { Plus, Pencil, Ban, RotateCcw, Eye, SlidersHorizontal } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
+import { Switch } from "@/components/ui/Switch";
+import { FEATURE_DEFINITIONS } from "@/lib/features";
 import type { Tenant, PlanTier } from "@/types";
 
 export default function ConsoleTenantsPage() {
@@ -17,6 +19,9 @@ export default function ConsoleTenantsPage() {
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [featuresTenant, setFeaturesTenant] = useState<Tenant | null>(null);
+  const [tenantFeatures, setTenantFeatures] = useState<Record<string, boolean>>({});
+  const [savingFeatureKey, setSavingFeatureKey] = useState<string | null>(null);
   const supabase = createClient();
 
   useEffect(() => { if (user?.is_agency_superadmin) loadData(); }, [user]);
@@ -106,6 +111,47 @@ export default function ConsoleTenantsPage() {
     window.location.href = "/";
   };
 
+  const handleOpenFeatures = async (tenant: Tenant) => {
+    const { data } = await supabase
+      .from("tenant_features")
+      .select("feature_key, is_enabled")
+      .eq("tenant_id", tenant.id);
+
+    // No row yet for a given key means "on" (matches the DB default),
+    // so every module starts toggled on the first time this opens.
+    const map: Record<string, boolean> = {};
+    for (const f of FEATURE_DEFINITIONS) map[f.key] = true;
+    for (const row of data || []) map[row.feature_key] = row.is_enabled;
+
+    setTenantFeatures(map);
+    setFeaturesTenant(tenant);
+  };
+
+  const handleToggleFeature = async (featureKey: string) => {
+    if (!featuresTenant) return;
+    const nextValue = !tenantFeatures[featureKey];
+
+    // Optimistic — the switch flips immediately, then confirms against the DB.
+    setTenantFeatures((prev) => ({ ...prev, [featureKey]: nextValue }));
+    setSavingFeatureKey(featureKey);
+
+    const { error } = await supabase.from("tenant_features").upsert(
+      {
+        tenant_id: featuresTenant.id,
+        feature_key: featureKey,
+        is_enabled: nextValue,
+        updated_by: user!.id,
+      },
+      { onConflict: "tenant_id,feature_key" }
+    );
+
+    if (error) {
+      // Roll back on failure so the switch reflects what's actually saved.
+      setTenantFeatures((prev) => ({ ...prev, [featureKey]: !nextValue }));
+    }
+    setSavingFeatureKey(null);
+  };
+
   if (!user?.is_agency_superadmin) {
     return <div className="empty-state py-16"><p className="text-[var(--foreground-muted)]">Access denied</p></div>;
   }
@@ -159,6 +205,7 @@ export default function ConsoleTenantsPage() {
                   <td className="py-3 px-4">
                     <div className="flex items-center justify-end gap-1">
                       <button onClick={() => handleImpersonate(tenant.id)} className="p-1.5 rounded-lg hover:bg-[var(--surface-elevated)] text-[var(--accent)]" title="Impersonate"><Eye className="h-4 w-4" /></button>
+                      <button onClick={() => handleOpenFeatures(tenant)} className="p-1.5 rounded-lg hover:bg-[var(--surface-elevated)] text-[var(--foreground-muted)]" title="Manage Features"><SlidersHorizontal className="h-4 w-4" /></button>
                       <button onClick={() => { setEditingTenant(tenant); setLogoFile(null); setLogoPreview(tenant.logo_url); setLogoError(null); setShowModal(true); }} className="p-1.5 rounded-lg hover:bg-[var(--surface-elevated)]"><Pencil className="h-4 w-4 text-[var(--foreground-muted)]" /></button>
                       {tenant.is_suspended ? (
                         <button onClick={() => handleSuspend(tenant.id, false)} className="p-1.5 rounded-lg hover:bg-[var(--surface-elevated)] text-[var(--success)]"><RotateCcw className="h-4 w-4" /></button>
@@ -217,6 +264,45 @@ export default function ConsoleTenantsPage() {
                 <button type="submit" disabled={isSaving} className="btn-primary flex-1" style={{ backgroundColor: "#FF6B35" }}>{isSaving ? "Saving..." : editingTenant ? "Save Changes" : "Create Tenant"}</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {featuresTenant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[var(--surface-overlay)]">
+          <div className="w-full max-w-lg rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-6 animate-slide-up max-h-[90vh] overflow-y-auto">
+            <div className="mb-1">
+              <h2 className="text-lg font-semibold">Features — {featuresTenant.name}</h2>
+              <p className="text-sm text-[var(--foreground-muted)] mt-1">
+                Turn a module off and this tenant loses access to it immediately — the
+                nav item disappears and the underlying data is blocked, not just hidden.
+              </p>
+            </div>
+            <div className="mt-4 divide-y divide-[var(--border)]">
+              {FEATURE_DEFINITIONS.map((feature) => (
+                <div key={feature.key} className="flex items-center justify-between py-3.5 gap-4">
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm">{feature.label}</p>
+                    <p className="text-xs text-[var(--foreground-muted)] mt-0.5">{feature.description}</p>
+                  </div>
+                  <Switch
+                    checked={!!tenantFeatures[feature.key]}
+                    onChange={() => handleToggleFeature(feature.key)}
+                    disabled={savingFeatureKey === feature.key}
+                    label={feature.label}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="pt-5">
+              <button
+                type="button"
+                onClick={() => setFeaturesTenant(null)}
+                className="btn-secondary w-full"
+              >
+                Done
+              </button>
+            </div>
           </div>
         </div>
       )}

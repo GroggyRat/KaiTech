@@ -19,6 +19,15 @@ export interface Tenant {
   created_at: string;
 }
 
+export interface TenantFeature {
+  id: string;
+  tenant_id: string;
+  feature_key: string;
+  is_enabled: boolean;
+  updated_at: string;
+  updated_by: string | null;
+}
+
 export interface Profile {
   id: string;
   email: string;

@@ -14,6 +14,32 @@ export default function PayrollPage() {
   const [selectedRun, setSelectedRun] = useState<PayrollRun | null>(null);
   const [entries, setEntries] = useState<PayrollEntry[]>([]);
   const [isRunning, setIsRunning] = useState(false);
+  const [isSendingPayslips, setIsSendingPayslips] = useState(false);
+  const [payslipMessage, setPayslipMessage] = useState<string | null>(null);
+
+  const handleSendPayslips = async (runId: string) => {
+    setIsSendingPayslips(true);
+    setPayslipMessage(null);
+    try {
+      const res = await fetch("/api/payroll/send-payslips", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payrollRunId: runId }),
+      });
+      const result = await res.json();
+      if (!res.ok) {
+        setPayslipMessage(`Error: ${result.error || "Failed to send payslips"}`);
+      } else {
+        setPayslipMessage(
+          `Sent ${result.sent} payslip${result.sent === 1 ? "" : "s"}` +
+            (result.skipped > 0 ? ` (${result.skipped} skipped — no email on file)` : "")
+        );
+      }
+    } catch (err: any) {
+      setPayslipMessage(`Error: ${err?.message || "Network error"}`);
+    }
+    setIsSendingPayslips(false);
+  };
   const [showRunDetails, setShowRunDetails] = useState<string | null>(null);
   const supabase = createClient();
 
@@ -348,6 +374,13 @@ export default function PayrollPage() {
                   Finalize Run
                 </button>
               )}
+              <button
+                onClick={() => handleSendPayslips(selectedRun.id)}
+                disabled={isSendingPayslips}
+                className="btn-primary text-xs"
+              >
+                {isSendingPayslips ? "Sending..." : "Send Payslips"}
+              </button>
               <button onClick={() => generateBredBankFile(selectedRun)} className="btn-secondary text-xs">
                 <Download className="h-3 w-3 mr-1" />BRED Bank CSV
               </button>
@@ -361,6 +394,11 @@ export default function PayrollPage() {
                 <Download className="h-3 w-3 mr-1" />FRCS CSV
               </button>
             </div>
+            {payslipMessage && (
+              <p className={`text-xs mt-2 ${payslipMessage.startsWith("Error") ? "text-[var(--danger)]" : "text-[var(--success)]"}`}>
+                {payslipMessage}
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-3 gap-4">
