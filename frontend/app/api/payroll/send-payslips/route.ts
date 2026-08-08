@@ -2,22 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { jsPDF } from "jspdf";
-import { cookies } from "next/headers";
-
-function getUserFromCookie() {
-  const cookieStore = cookies();
-  const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL
-    ?.split(".")[0]
-    ?.split("//")[1] || "";
-  const cookie = cookieStore.get(`sb-${projectRef}-auth-token`);
-  if (!cookie) return null;
-  try {
-    const session = JSON.parse(cookie.value);
-    return session.user || null;
-  } catch {
-    return null;
-  }
-}
 
 function generatePayslipPdf(entry: any, tenant: any, period: any): string {
   const doc = new jsPDF();
@@ -77,14 +61,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "RESEND_API_KEY is not configured" }, { status: 500 });
   }
 
-  // WORKAROUND: Bypass broken JWT verification (HS256 vs ES256 mismatch)
-  // Read user directly from the Supabase session cookie instead of getUser()
-  const user = getUserFromCookie();
+  // FIX: Use getSession() instead of getUser() to bypass HS256/ES256 JWT verification bug.
+  // getSession() reads the user from cookies locally without making a network request.
+  const supabase = createServerClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
+
   if (!user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
-
-  const supabase = createServerClient();
 
   const { data: run } = await supabase
     .from("payroll_runs")
