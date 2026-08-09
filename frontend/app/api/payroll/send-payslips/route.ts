@@ -50,7 +50,8 @@ function generatePayslipPdf(entry: any, tenant: any, period: any): string {
   return doc.output("datauristring").split(",")[1];
 }
 
-function decodeJwtPayload(token: string): string | null {
+// Decode JWT payload WITHOUT verifying signature — bypasses HS256/ES256 bug
+function decodeJwtPayload(token: string): { sub: string } | null {
   try {
     const base64Payload = token.split(".")[1];
     if (!base64Payload) return null;
@@ -59,8 +60,7 @@ function decodeJwtPayload(token: string): string | null {
       normalized.length + ((4 - (normalized.length % 4)) % 4),
       "="
     );
-    const payload = JSON.parse(Buffer.from(padded, "base64").toString("utf-8"));
-    return payload.sub || null;
+    return JSON.parse(Buffer.from(padded, "base64").toString("utf-8"));
   } catch {
     return null;
   }
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "RESEND_API_KEY is not configured" }, { status: 500 });
   }
 
-  // FIX: Read auth token from Authorization header (bypasses cookie issues)
+  // Extract token from Authorization header
   const authHeader = request.headers.get("Authorization");
   const token = authHeader?.replace("Bearer ", "");
 
@@ -84,10 +84,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const userId = decodeJwtPayload(token);
-  if (!userId) {
+  const payload = decodeJwtPayload(token);
+  if (!payload?.sub) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
+
+  const userId = payload.sub;
 
   const admin = createAdminClient();
 
