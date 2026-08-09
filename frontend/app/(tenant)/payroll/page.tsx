@@ -17,15 +17,21 @@ export default function PayrollPage() {
   const [isSendingPayslips, setIsSendingPayslips] = useState(false);
   const [payslipMessage, setPayslipMessage] = useState<string | null>(null);
 
-  const handleSendPayslips = async (runId: string) => {
+    const handleSendPayslips = async (runId: string) => {
     setIsSendingPayslips(true);
     setPayslipMessage(null);
     try {
+      // Get the current session token
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
       const res = await fetch("/api/payroll/send-payslips", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ payrollRunId: runId }),
-        credentials: "include", // <-- FIX: ensures auth cookies are sent
       });
       const result = await res.json();
       if (!res.ok) {
