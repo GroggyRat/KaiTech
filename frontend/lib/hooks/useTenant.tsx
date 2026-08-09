@@ -38,8 +38,8 @@ export function TenantProvider({ children }: { children: React.ReactNode }): Rea
   const supabase = createClient();
 
   const loadTenant = async () => {
-    const { data: userData } = await supabase.auth.getUser();
-    if (!userData.user) {
+   const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
       setIsLoading(false);
       return;
     }
@@ -48,7 +48,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }): Rea
     const { data: allRoles } = await supabase
       .from("user_tenant_roles")
       .select("*")
-      .eq("user_id", userData.user.id);
+      .eq("user_id", session?.user.id);
     setRoles(allRoles || []);
 
     let tenantId = localStorage.getItem("kaiworkforce_tenant_id");
@@ -60,7 +60,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }): Rea
       const { data: roleRows } = await supabase
         .from("user_tenant_roles")
         .select("tenant_id, is_primary")
-        .eq("user_id", userData.user.id)
+        .eq("user_id", session?.user.id)
         .order("is_primary", { ascending: false });
 
       if (roleRows && roleRows.length > 0) {
@@ -85,7 +85,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }): Rea
       const { data: roleData } = await supabase
         .from("user_tenant_roles")
         .select("role")
-        .eq("user_id", userData.user.id)
+        .eq("user_id", session?.user.id)
         .eq("tenant_id", tenantId)
         .single();
       setRole(roleData?.role || null);

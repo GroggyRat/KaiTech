@@ -54,8 +54,8 @@ export default function WorkSitesPage() {
     if (!newSite || !tenant) return;
     setSaveError(null);
 
-    const { data: userData } = await supabase.auth.getUser();
-    if (!userData.user) {
+   const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
       setSaveError("You must be signed in to save a site.");
       return;
     }
@@ -66,7 +66,7 @@ export default function WorkSitesPage() {
       location: `POINT(${newSite.lng} ${newSite.lat})`,
       radius_meters: newSite.radius,
       status: role === "manager" ? "pending" : "active",
-      created_by: userData.user.id,
+      created_by: session?.user.id,
     });
 
     if (!error) {
@@ -78,12 +78,12 @@ export default function WorkSitesPage() {
   };
 
   const handleApprove = async (siteId: string) => {
-    const { data: userData } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
     await supabase
       .from("work_sites")
       .update({
         status: "active",
-        approved_by: userData.user?.id,
+        approved_by: session?.user?.id,
         approved_at: new Date().toISOString(),
       })
       .eq("id", siteId);

@@ -16,10 +16,21 @@ export default function LoginPage() {
     e.preventDefault();
     setIsLoading(true);
     setError("");
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) setError(error.message);
-    else window.location.href = "/";
-    setIsLoading(false);
+
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (signInError) {
+      setError(signInError.message);
+      setIsLoading(false);
+      return;
+    }
+
+    // Force full page reload so middleware picks up the new session cookie
+    // router.replace() is unreliable here — window.location is the only guaranteed way
+    window.location.replace("/");
   };
 
   return (
@@ -34,17 +45,55 @@ export default function LoginPage() {
             className="mx-auto h-14 w-auto"
             priority
           />
-          <p className="text-sm text-[var(--foreground-muted)] mt-2">Sign in to your account</p>
+          <p className="text-sm text-[var(--foreground-muted)] mt-2">
+            Sign in to your account
+          </p>
         </div>
         <form onSubmit={handleLogin} className="space-y-4">
           {error && (
-            <div className="p-3 rounded-xl text-sm bg-[var(--danger)]/10 text-[var(--danger)]">{error}</div>
+            <div className="p-3 rounded-xl text-sm bg-[var(--danger)]/10 text-[var(--danger)]">
+              {error}
+            </div>
           )}
-          <div><label className="label">Email</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="input" placeholder="you@company.com" required /></div>
-          <div><label className="label">Password</label><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="input" placeholder="••••••••" required /></div>
-          <button type="submit" disabled={isLoading} className="btn-primary w-full">{isLoading ? "Signing in..." : "Sign In"}</button>
+          <div>
+            <label className="label">Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="input"
+              placeholder="you@company.com"
+              required
+            />
+          </div>
+          <div>
+            <label className="label">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="input"
+              placeholder="••••••••"
+              required
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="btn-primary w-full"
+          >
+            {isLoading ? "Signing in..." : "Sign In"}
+          </button>
         </form>
-        <p className="mt-6 text-center text-sm text-[var(--foreground-muted)]">Don't have an account? <Link href="/auth/register/" className="text-[var(--accent)] hover:underline">Contact your agency admin</Link></p>
+        <p className="mt-6 text-center text-sm text-[var(--foreground-muted)]">
+          Don&apos;t have an account?{" "}
+          <Link
+            href="/auth/register/"
+            className="text-[var(--accent)] hover:underline"
+          >
+            Contact your agency admin
+          </Link>
+        </p>
       </div>
     </div>
   );

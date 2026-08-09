@@ -27,7 +27,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
   const supabase = createClient();
 
   const loadUser = async () => {
-    const { data: { user: authUser } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
+    const authUser = session?.user;
     if (!authUser) {
       setUser(null);
       setRoles([]);

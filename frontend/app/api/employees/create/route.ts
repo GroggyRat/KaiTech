@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
+import { getUserIdFromCookie } from "@/lib/supabase/cookie-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 function generateTempPassword(): string {
@@ -42,21 +43,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid role" }, { status: 400 });
   }
 
-  // Verify the caller is actually signed in and is an admin for this tenant.
-  // This uses the normal RLS-scoped client — nothing here bypasses auth.
-  const supabase = createServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+    const userId = getUserIdFromCookie();
+  if (!userId) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
+
+  const supabase = createServerClient();
 
   const { data: callerRole } = await supabase
     .from("user_tenant_roles")
     .select("role")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .eq("tenant_id", tenantId)
     .single();
 

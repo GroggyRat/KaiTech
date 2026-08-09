@@ -9,12 +9,7 @@ export function cn(...inputs: ClassValue[]) {
  * Parses a PostGIS geography(point) column value as returned by
  * Supabase/PostgREST into a plain { lat, lng } object.
  *
- * PostgREST may return geography columns as:
- * - GeoJSON: { type: "Point", coordinates: [lng, lat] }
- * - WKT string: "POINT(178.4501 -18.1248)" or "SRID=4326;POINT(178.4501 -18.1248)"
- * - Already-parsed object: { lat, lng }
- *
- * Falls back to null if the shape is unrecognized.
+ * Handles: {lat, lng} objects, GeoJSON, WKT strings, and hex EWKB.
  */
 export function parseGeoPoint(
   value: unknown
@@ -46,8 +41,13 @@ export function parseGeoPoint(
     }
   }
 
-  // WKT string: "POINT(lng lat)" or "SRID=4326;POINT(lng lat)"
+  // String: hex EWKB, WKT, or SRID-prefixed WKT
   if (typeof value === "string") {
+    // Try hex EWKB first (PostGIS default binary output)
+    const ewkb = parseHexEWKB(value);
+    if (ewkb) return ewkb;
+
+    // WKT: "POINT(lng lat)" or "SRID=4326;POINT(lng lat)"
     const wkt = value.replace(/^SRID=\d+;/i, "").trim();
     const match = wkt.match(/^POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)$/i);
     if (match) {
@@ -60,6 +60,35 @@ export function parseGeoPoint(
   }
 
   return null;
+}
+
+// ─── Parse PostGIS hex EWKB ─────────────────────────────────────
+export function parseHexEWKB(hex: string): { lat: number; lng: number } | null {
+  if (!hex || hex.length < 42 || !/^[0-9a-fA-F]+$/.test(hex)) return null;
+
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
+  }
+
+  const view = new DataView(bytes.buffer);
+  const littleEndian = bytes[0] === 1;
+
+  const type = view.getUint32(1, littleEndian);
+  const hasSRID = (type & 0x20000000) !== 0;
+  const geometryType = type & 0x0FFFFFFF;
+
+  if (geometryType !== 1) return null; // Not a Point
+
+  let offset = 5;
+  if (hasSRID) offset += 4;
+
+  if (bytes.length < offset + 16) return null;
+
+  const x = view.getFloat64(offset, littleEndian);
+  const y = view.getFloat64(offset + 8, littleEndian);
+
+  return { lat: y, lng: x };
 }
 
 export function formatCurrency(amount: number, currency = "FJD"): string {

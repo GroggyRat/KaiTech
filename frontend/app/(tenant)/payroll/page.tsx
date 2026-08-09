@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useTenant } from "@/lib/hooks/useTenant";
 import { createClient } from "@/lib/supabase/client";
-import { Play, FileText, Download, ChevronDown, ChevronUp, AlertCircle } from "lucide-react";
+import { Play, FileText, Download, AlertCircle } from "lucide-react";
 import { formatCurrency, formatDate, calculatePAYE, calculateFNPF } from "@/lib/utils";
 import type { PayrollRun, PayrollEntry, PayPeriod, Employee, Timesheet } from "@/types";
 
@@ -31,7 +31,7 @@ export default function PayrollPage() {
         setPayslipMessage(`Error: ${result.error || "Failed to send payslips"}`);
       } else {
         setPayslipMessage(
-          `Sent ${result.sent} payslip${result.sent === 1 ? "" : "s"}` +
+          `Sent ${result.sent} payslip${result.sent === 1 ? "" : "s"} ` +
             (result.skipped > 0 ? ` (${result.skipped} skipped — no email on file)` : "")
         );
       }
@@ -75,12 +75,18 @@ export default function PayrollPage() {
       return;
     }
 
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      alert("You must be signed in to run payroll.");
+      setIsRunning(false);
+      return;
+    }
+
     const { data: timesheets, error: timesheetsError } = await supabase
       .from("timesheets")
       .select("*, employee:employees(*)")
       .eq("tenant_id", tenant!.id)
-      .eq("pay_period_start", period.start_date)
-      .eq("pay_period_end", period.end_date)
+      .eq("pay_period_id", periodId)
       .eq("status", "approved");
 
     if (timesheetsError) {
@@ -95,19 +101,12 @@ export default function PayrollPage() {
       return;
     }
 
-    const { data: userData } = await supabase.auth.getUser();
-    if (!userData.user) {
-      alert("You must be signed in to run payroll.");
-      setIsRunning(false);
-      return;
-    }
-
     const { data: run, error: runError } = await supabase
       .from("payroll_runs")
       .insert({
         tenant_id: tenant!.id,
         pay_period_id: periodId,
-        run_by: userData.user.id,
+        run_by: session.user.id,
         status: "draft",
       })
       .select()
@@ -135,9 +134,8 @@ export default function PayrollPage() {
 
       const fnpf = calculateFNPF(grossPay);
 
-      // Approximate annual gross for PAYE (fortnightly = 26 periods)
       const periodsPerYear = tenant?.pay_period_frequency === "weekly" ? 52 :
-                            tenant?.pay_period_frequency === "monthly" ? 12 : 26;
+                             tenant?.pay_period_frequency === "monthly" ? 12 : 26;
       const annualGross = grossPay * periodsPerYear;
       const paye = calculatePAYE(annualGross) / periodsPerYear;
 
@@ -285,7 +283,6 @@ export default function PayrollPage() {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    // Log compliance file generation
     supabase.from("compliance_files").insert({
       tenant_id: tenant!.id,
       payroll_run_id: run.id,

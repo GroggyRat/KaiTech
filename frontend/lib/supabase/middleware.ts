@@ -1,7 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/auth/login"];
+const PUBLIC_PATHS = ["/auth/login", "/auth/register", "/auth/callback"];
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({
@@ -36,25 +36,37 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  // FIX: Use getSession() instead of getUser() to bypass HS256/ES256 JWT verification bug.
-  // getSession() reads the user from cookies locally without making a network request.
+  // Use getSession (reads cookies only, no network call) for redirect checks.
+  // getUser() validates the JWT with Supabase which can race/fail after login.
   const {
     data: { session },
   } = await supabase.auth.getSession();
-  const user = session?.user;
 
   const path = request.nextUrl.pathname;
-  const isPublicPath = PUBLIC_PATHS.some((p) => path === p || path === p + "/");
+  const isPublicPath = PUBLIC_PATHS.some(
+    (p) => path === p || path.startsWith(p + "/")
+  );
   const isApiRoute = path.startsWith("/api/");
+  const isStatic =
+    path.startsWith("/_next/") ||
+    path.startsWith("/favicon") ||
+    path.includes(".");
 
-  if (!user && !isPublicPath && !isApiRoute) {
+  // Don't touch static files or API routes
+  if (isStatic || isApiRoute) {
+    return response;
+  }
+
+  // No session + protected route → login
+  if (!session && !isPublicPath) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/auth/login";
     loginUrl.searchParams.set("redirectedFrom", path);
     return NextResponse.redirect(loginUrl);
   }
 
-  if (user && isPublicPath) {
+  // Has session + public route (login page) → home
+  if (session && isPublicPath) {
     const homeUrl = request.nextUrl.clone();
     homeUrl.pathname = "/";
     homeUrl.search = "";
