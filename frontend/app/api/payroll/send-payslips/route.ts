@@ -4,13 +4,11 @@ import { jsPDF } from "jspdf";
 
 function generatePayslipPdf(entry: any, tenant: any, period: any): string {
   const doc = new jsPDF();
-
   doc.setFontSize(16);
   doc.text("Payslip", 14, 18);
   doc.setFontSize(10);
   doc.setTextColor(100);
   doc.text(tenant?.name || "", 14, 25);
-
   doc.setTextColor(0);
   doc.setFontSize(11);
   let y = 40;
@@ -21,21 +19,18 @@ function generatePayslipPdf(entry: any, tenant: any, period: any): string {
     doc.text(value, 140, y);
     y += 8;
   };
-
   line("Employee", entry.employee?.profile?.full_name || "");
   line("Pay Period", period ? `${period.start_date} - ${period.end_date}` : "");
   y += 4;
   doc.setDrawColor(200);
   doc.line(14, y, 196, y);
   y += 10;
-
   line("Regular Hours", `${entry.regular_hours}`);
   line("Overtime Hours", `${entry.overtime_hours}`);
   line("Hourly Rate", `$$${Number(entry.hourly_rate).toFixed(2)}`);
   y += 4;
   doc.line(14, y, 196, y);
   y += 10;
-
   line("Gross Pay", `$$${Number(entry.gross_pay).toFixed(2)}`);
   if (entry.allowances) line("Allowances", `$$${Number(entry.allowances).toFixed(2)}`);
   line("FNPF (Employee)", `-$${Number(entry.fnpf_employee_contribution).toFixed(2)}`);
@@ -46,11 +41,9 @@ function generatePayslipPdf(entry: any, tenant: any, period: any): string {
   y += 10;
   doc.setFontSize(13);
   line("Net Pay", `$$${Number(entry.net_pay).toFixed(2)}`);
-
   return doc.output("datauristring").split(",")[1];
 }
 
-// Decode JWT payload WITHOUT verifying signature — bypasses HS256/ES256 bug
 function decodeJwtPayload(token: string): { sub: string } | null {
   try {
     const base64Payload = token.split(".")[1];
@@ -76,10 +69,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "RESEND_API_KEY is not configured" }, { status: 500 });
   }
 
-  // Extract token from Authorization header
   const authHeader = request.headers.get("Authorization");
   const token = authHeader?.replace("Bearer ", "");
-
   if (!token) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
@@ -90,7 +81,6 @@ export async function POST(request: NextRequest) {
   }
 
   const userId = payload.sub;
-
   const admin = createAdminClient();
 
   const { data: run } = await admin
@@ -139,28 +129,40 @@ export async function POST(request: NextRequest) {
       to: entry.employee.profile.email,
       subject: `Your Payslip — ${run.pay_period?.start_date} to ${run.pay_period?.end_date}`,
       html: `<p>Hi ${entry.employee.profile.full_name},</p><p>Your payslip for this pay period is attached.</p><p>Net pay: <strong>$${Number(entry.net_pay).toFixed(2)}</strong></p><p>— ${tenant?.name || ""}</p>`,
-      attachments: [
-        {
-          filename: `payslip-${run.pay_period?.start_date}.pdf`,
-          content: pdfBase64,
-        },
-      ],
+      attachments: [{ filename: `payslip-${run.pay_period?.start_date}.pdf`, content: pdfBase64 }],
     };
   });
 
-  const res = await fetch("https://api.resend.com/emails/batch", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(batchPayload),
-  });
+  // Call Resend with robust error handling
+  let res;
+  try {
+    res = await fetch("https://api.resend.com/emails/batch", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(batchPayload),
+    });
+  } catch (fetchErr: any) {
+    console.error("[Payslip API] Fetch to Resend failed:", fetchErr.message);
+    return NextResponse.json({ error: "Failed to connect to email service" }, { status: 502 });
+  }
 
-  const result = await res.json();
+  // Safely parse Resend response (might be HTML error page)
+  let result: any;
+  const responseText = await res.text();
+  try {
+    result = JSON.parse(responseText);
+  } catch {
+    result = { message: responseText.slice(0, 200) };
+  }
+
+  console.log("[Payslip API] Resend status:", res.status, "body:", result);
 
   if (!res.ok) {
-    return NextResponse.json({ error: result?.message || "Failed to send payslips" }, { status: 502 });
+    const errorMsg = result?.message || result?.error || `Resend error (${res.status})`;
+    return NextResponse.json({ error: errorMsg }, { status: 502 });
   }
 
   return NextResponse.json({
