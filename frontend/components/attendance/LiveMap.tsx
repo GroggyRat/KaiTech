@@ -33,7 +33,6 @@ export default function LiveMap({
   center,
   showOnlyUser 
 }: LiveMapProps) {
-  // Calculate map center
   const defaultCenter: [number, number] = center 
     ? [center.lat, center.lng] 
     : [-18.1248, 178.4501];
@@ -51,7 +50,6 @@ export default function LiveMap({
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
-        {/* Work site geofences */}
         {workSites.map((site) => {
           const center = parseGeoPoint(site.location);
           if (!center) return null;
@@ -67,11 +65,11 @@ export default function LiveMap({
           );
         })}
 
-        {/* Team member markers */}
         {teamShifts.map((shift) => {
           const ping = latestPings[shift.id];
+          // LocationPing uses 'location' (PostGIS geography), not latitude/longitude fields
           const loc = ping
-            ? { lat: ping.latitude, lng: ping.longitude }
+            ? parseGeoPoint(ping.location)
             : parseGeoPoint(shift.clock_in_location);
           if (!loc) return null;
           
