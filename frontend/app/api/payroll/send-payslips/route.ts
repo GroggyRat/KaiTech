@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
-import { getUserIdFromCookie } from "@/lib/supabase/cookie-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { jsPDF } from "jspdf";
 
@@ -49,7 +48,7 @@ function generatePayslipPdf(entry: any, tenant: any, period: any): string {
   doc.setFontSize(13);
   line("Net Pay", `$$${Number(entry.net_pay).toFixed(2)}`);
 
-  return doc.output("datauristring").split(",")[1]; // base64 payload only
+  return doc.output("datauristring").split(",")[1];
 }
 
 export async function POST(request: NextRequest) {
@@ -62,13 +61,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "RESEND_API_KEY is not configured" }, { status: 500 });
   }
 
-  // FIX: Bypass HS256/ES256 JWT verification bug by reading cookie directly
-  const userId = getUserIdFromCookie();
-  if (!userId) {
+  // FIX: Use Supabase SSR client with getSession() — reads cookies locally, no network call
+  const supabase = createServerClient();
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if (!session?.user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const supabase = createServerClient();
+  const userId = session.user.id;
 
   const { data: run } = await supabase
     .from("payroll_runs")
@@ -83,7 +84,7 @@ export async function POST(request: NextRequest) {
   const { data: callerRole } = await supabase
     .from("user_tenant_roles")
     .select("role")
-    .eq("user_id", userId)  // <-- was user.id, now userId
+    .eq("user_id", userId)
     .eq("tenant_id", run.tenant_id)
     .single();
 
@@ -123,7 +124,6 @@ export async function POST(request: NextRequest) {
     };
   });
 
-  // Resend batch endpoint: send up to 100 emails in one call.
   const res = await fetch("https://api.resend.com/emails/batch", {
     method: "POST",
     headers: {
