@@ -25,6 +25,7 @@ export default function PayrollPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ payrollRunId: runId }),
+        credentials: "include", // <-- FIX: ensures auth cookies are sent
       });
       const result = await res.json();
       if (!res.ok) {
@@ -40,6 +41,7 @@ export default function PayrollPage() {
     }
     setIsSendingPayslips(false);
   };
+
   const [showRunDetails, setShowRunDetails] = useState<string | null>(null);
   const supabase = createClient();
 

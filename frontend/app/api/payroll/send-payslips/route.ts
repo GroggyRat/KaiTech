@@ -50,14 +50,10 @@ function generatePayslipPdf(entry: any, tenant: any, period: any): string {
   return doc.output("datauristring").split(",")[1];
 }
 
-// Parse JWT payload without verifying signature (avoids HS256/ES256 mismatch)
-function getUserIdFromCookie(request: NextRequest): string | null {
-  const token = request.cookies.get("sb-access-token")?.value;
-  if (!token) return null;
-
+function decodeJwtPayload(token: string): string | null {
   try {
     const base64Payload = token.split(".")[1];
-    // base64url → base64
+    if (!base64Payload) return null;
     const normalized = base64Payload.replace(/-/g, "+").replace(/_/g, "/");
     const padded = normalized.padEnd(
       normalized.length + ((4 - (normalized.length % 4)) % 4),
@@ -70,6 +66,73 @@ function getUserIdFromCookie(request: NextRequest): string | null {
   }
 }
 
+function extractUserIdFromCookieValue(value: string): string | null {
+  // Try raw JWT
+  let userId = decodeJwtPayload(value);
+  if (userId) return userId;
+
+  // Try JSON array: ["access_token", "refresh_token"]
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      userId = decodeJwtPayload(parsed[0]);
+      if (userId) return userId;
+    }
+    if (typeof parsed === "object" && parsed.access_token) {
+      userId = decodeJwtPayload(parsed.access_token);
+      if (userId) return userId;
+    }
+  } catch {
+    // not JSON
+  }
+
+  return null;
+}
+
+function getUserIdFromCookie(request: NextRequest): string | null {
+  const allCookies = request.cookies.getAll();
+  
+  // Log every cookie name for debugging
+  console.log("[Payslip API] All cookies:", allCookies.map((c) => c.name));
+
+  // 1. Try known Supabase cookie names
+  const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL
+    ?.replace("https://", "")
+    ?.split(".")[0];
+  
+  const candidates = [
+    `sb-${projectRef}-auth-token`,
+    "sb-access-token",
+    "sb-refresh-token",
+    "supabase-auth-token",
+  ];
+
+  for (const name of candidates) {
+    const cookie = request.cookies.get(name);
+    if (cookie?.value) {
+      const userId = extractUserIdFromCookieValue(cookie.value);
+      if (userId) {
+        console.log("[Payslip API] Found user via:", name);
+        return userId;
+      }
+    }
+  }
+
+  // 2. Fallback: scan ALL cookies for anything that looks like a JWT
+  for (const cookie of allCookies) {
+    if (cookie.value.includes(".") && cookie.value.length > 100) {
+      const userId = extractUserIdFromCookieValue(cookie.value);
+      if (userId) {
+        console.log("[Payslip API] Found user via fallback scan:", cookie.name);
+        return userId;
+      }
+    }
+  }
+
+  console.log("[Payslip API] No valid auth cookie found");
+  return null;
+}
+
 export async function POST(request: NextRequest) {
   const { payrollRunId } = await request.json();
   if (!payrollRunId) {
@@ -80,11 +143,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "RESEND_API_KEY is not configured" }, { status: 500 });
   }
 
-  // FIX: Parse JWT cookie manually — bypasses HS256/ES256 validation bug
   const userId = getUserIdFromCookie(request);
   if (!userId) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
+
+  console.log("[Payslip API] Authenticated user:", userId);
 
   const admin = createAdminClient();
 
