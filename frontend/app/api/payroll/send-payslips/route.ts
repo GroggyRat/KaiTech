@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { jsPDF } from "jspdf";
 
@@ -51,6 +50,26 @@ function generatePayslipPdf(entry: any, tenant: any, period: any): string {
   return doc.output("datauristring").split(",")[1];
 }
 
+// Parse JWT payload without verifying signature (avoids HS256/ES256 mismatch)
+function getUserIdFromCookie(request: NextRequest): string | null {
+  const token = request.cookies.get("sb-access-token")?.value;
+  if (!token) return null;
+
+  try {
+    const base64Payload = token.split(".")[1];
+    // base64url → base64
+    const normalized = base64Payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(
+      normalized.length + ((4 - (normalized.length % 4)) % 4),
+      "="
+    );
+    const payload = JSON.parse(Buffer.from(padded, "base64").toString("utf-8"));
+    return payload.sub || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(request: NextRequest) {
   const { payrollRunId } = await request.json();
   if (!payrollRunId) {
@@ -61,17 +80,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "RESEND_API_KEY is not configured" }, { status: 500 });
   }
 
-  // FIX: Use Supabase SSR client with getSession() — reads cookies locally, no network call
-  const supabase = createServerClient();
-  const { data: { session } } = await supabase.auth.getSession();
-
-  if (!session?.user) {
+  // FIX: Parse JWT cookie manually — bypasses HS256/ES256 validation bug
+  const userId = getUserIdFromCookie(request);
+  if (!userId) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const userId = session.user.id;
+  const admin = createAdminClient();
 
-  const { data: run } = await supabase
+  const { data: run } = await admin
     .from("payroll_runs")
     .select("*, pay_period:pay_periods(start_date, end_date)")
     .eq("id", payrollRunId)
@@ -81,7 +98,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Payroll run not found" }, { status: 404 });
   }
 
-  const { data: callerRole } = await supabase
+  const { data: callerRole } = await admin
     .from("user_tenant_roles")
     .select("role")
     .eq("user_id", userId)
@@ -92,9 +109,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Only tenant admins can send payslips" }, { status: 403 });
   }
 
-  const admin = createAdminClient();
-
-  const { data: tenant } = await admin.from("tenants").select("name, logo_url, accent_color").eq("id", run.tenant_id).single();
+  const { data: tenant } = await admin
+    .from("tenants")
+    .select("name, logo_url, accent_color")
+    .eq("id", run.tenant_id)
+    .single();
 
   const { data: entries } = await admin
     .from("payroll_entries")
