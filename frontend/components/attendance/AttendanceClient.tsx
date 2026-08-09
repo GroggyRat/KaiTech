@@ -356,11 +356,11 @@ export default function AttendanceClient() {
           <LiveMap
             workSites={workSites}
             teamShifts={activeShift ? [activeShift] : []}
-            latestPings={activeShift ? { [activeShift.id]: { 
-              shift_id: activeShift.id, 
-              latitude: myLocation.lat, 
-              longitude: myLocation.lng 
-            } as LocationPing } : {}}
+           latestPings={activeShift ? { [activeShift.id]: { 
+            shift_id: activeShift.id, 
+            latitude: myLocation.lat, 
+            longitude: myLocation.lng 
+          } as unknown as LocationPing } : {}}
             center={myLocation}
             showOnlyUser={true}
           />
