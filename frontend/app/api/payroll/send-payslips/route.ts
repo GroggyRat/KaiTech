@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "payroll@kaiworkforce.com";
+const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || "payroll@workforce.kaimasala.com";
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
@@ -78,7 +78,6 @@ export async function POST(request: NextRequest) {
     }
 
     // ── 4. Build batch email payload ───────────────────────────────────
-    // FIX: pay_periods and tenants are arrays from Supabase
     const payPeriod = Array.isArray(run.pay_periods) ? run.pay_periods[0] : run.pay_periods;
     const tenant = Array.isArray(run.tenants) ? run.tenants[0] : run.tenants;
 
@@ -126,23 +125,18 @@ export async function POST(request: NextRequest) {
     <tr>
       <td align="center" style="padding:40px 16px;">
         <table role="presentation" width="100%" max-width="560" style="max-width:560px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);">
-          <!-- Header -->
           <tr>
             <td style="background:${accentColor};padding:32px 32px 24px;text-align:center;">
               <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:600;letter-spacing:-0.3px;">${tenantName}</h1>
               <p style="margin:6px 0 0;color:rgba(255,255,255,0.85);font-size:13px;">Payslip Notification</p>
             </td>
           </tr>
-          
-          <!-- Body -->
           <tr>
             <td style="padding:32px;">
               <p style="margin:0 0 16px;color:#18181b;font-size:16px;line-height:1.5;">Hi ${fullName},</p>
               <p style="margin:0 0 24px;color:#3f3f46;font-size:15px;line-height:1.5;">
                 Your payslip for <strong style="color:#18181b;">${periodStart}</strong> to <strong style="color:#18181b;">${periodEnd}</strong> is now available.
               </p>
-              
-              <!-- Pay Summary Card -->
               <table role="presentation" width="100%" style="background:#fafafa;border-radius:8px;margin-bottom:24px;">
                 <tr>
                   <td style="padding:20px 24px;">
@@ -152,9 +146,7 @@ export async function POST(request: NextRequest) {
                   </td>
                 </tr>
               </table>
-
               ${pdfUrl ? `
-              <!-- CTA -->
               <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-bottom:16px;">
                 <tr>
                   <td style="border-radius:8px;background:${accentColor};text-align:center;">
@@ -168,8 +160,6 @@ export async function POST(request: NextRequest) {
               `}
             </td>
           </tr>
-          
-          <!-- Footer -->
           <tr>
             <td style="padding:24px 32px;border-top:1px solid #f4f4f5;text-align:center;">
               <p style="margin:0;color:#a1a1aa;font-size:12px;line-height:1.5;">— ${tenantName}<br/>This is an automated payroll notification.</p>
