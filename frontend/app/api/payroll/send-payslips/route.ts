@@ -65,9 +65,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Missing payrollRunId" }, { status: 400 });
   }
 
+  // CRITICAL CHECK: Log if API key is missing
   if (!process.env.RESEND_API_KEY) {
-    return NextResponse.json({ error: "RESEND_API_KEY is not configured" }, { status: 500 });
+    console.error("[Payslip API] RESEND_API_KEY is NOT SET in environment");
+    return NextResponse.json({ error: "Email service not configured (RESEND_API_KEY missing)" }, { status: 500 });
   }
+
+  console.log("[Payslip API] RESEND_API_KEY exists, length:", process.env.RESEND_API_KEY.length);
 
   const authHeader = request.headers.get("Authorization");
   const token = authHeader?.replace("Bearer ", "");
@@ -125,15 +129,17 @@ export async function POST(request: NextRequest) {
   const batchPayload = validEntries.map((entry: any) => {
     const pdfBase64 = generatePayslipPdf(entry, tenant, run.pay_period);
     return {
-      from: `${tenant?.name || "KaiWorkforce"} <payroll@kaimasala.com>`,
+      // FIX: Use Resend's test domain (free plan, no verification needed)
+      from: "KaiWorkforce <onboarding@resend.dev>",
       to: entry.employee.profile.email,
       subject: `Your Payslip — ${run.pay_period?.start_date} to ${run.pay_period?.end_date}`,
-      html: `<p>Hi ${entry.employee.profile.full_name},</p><p>Your payslip for this pay period is attached.</p><p>Net pay: <strong>$${Number(entry.net_pay).toFixed(2)}</strong></p><p>— ${tenant?.name || ""}</p>`,
+      html: `<p>Hi ${entry.employee.profile.full_name},</p><p>Your payslip for this pay period is attached.</p><p>Net pay: <strong>$${Number(entry.net_pay).toFixed(2)}</strong></p><p>— ${tenant?.name || "KaiWorkforce"}</p>`,
       attachments: [{ filename: `payslip-${run.pay_period?.start_date}.pdf`, content: pdfBase64 }],
     };
   });
 
-  // Call Resend with robust error handling
+  console.log("[Payslip API] Sending to Resend, payload count:", batchPayload.length);
+
   let res;
   try {
     res = await fetch("https://api.resend.com/emails/batch", {
@@ -149,19 +155,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Failed to connect to email service" }, { status: 502 });
   }
 
-  // Safely parse Resend response (might be HTML error page)
-  let result: any;
   const responseText = await res.text();
+  console.log("[Payslip API] Resend raw response:", res.status, responseText.slice(0, 500));
+
+  let result: any;
   try {
     result = JSON.parse(responseText);
   } catch {
     result = { message: responseText.slice(0, 200) };
   }
 
-  console.log("[Payslip API] Resend status:", res.status, "body:", result);
-
   if (!res.ok) {
     const errorMsg = result?.message || result?.error || `Resend error (${res.status})`;
+    console.error("[Payslip API] Resend error:", errorMsg);
     return NextResponse.json({ error: errorMsg }, { status: 502 });
   }
 
