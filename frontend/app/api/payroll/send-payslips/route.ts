@@ -78,10 +78,14 @@ export async function POST(request: NextRequest) {
     }
 
     // ── 4. Build batch email payload ───────────────────────────────────
-    const periodStart = run.pay_periods?.start_date ?? "—";
-    const periodEnd = run.pay_periods?.end_date ?? "—";
-    const tenantName = run.tenants?.name || "KaiWorkforce";
-    const accentColor = run.tenants?.accent_color || "#007AFF";
+    // FIX: pay_periods and tenants are arrays from Supabase
+    const payPeriod = Array.isArray(run.pay_periods) ? run.pay_periods[0] : run.pay_periods;
+    const tenant = Array.isArray(run.tenants) ? run.tenants[0] : run.tenants;
+
+    const periodStart = payPeriod?.start_date ?? "—";
+    const periodEnd = payPeriod?.end_date ?? "—";
+    const tenantName = tenant?.name || "KaiWorkforce";
+    const accentColor = tenant?.accent_color || "#007AFF";
 
     const batchPayload: any[] = [];
     const skipped: string[] = [];
