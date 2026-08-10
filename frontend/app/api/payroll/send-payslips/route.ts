@@ -2,46 +2,65 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { jsPDF } from "jspdf";
 
-function generatePayslipPdf(entry: any, tenant: any, period: any): string {
-  const doc = new jsPDF();
-  doc.setFontSize(16);
-  doc.text("Payslip", 14, 18);
-  doc.setFontSize(10);
-  doc.setTextColor(100);
-  doc.text(tenant?.name || "", 14, 25);
-  doc.setTextColor(0);
-  doc.setFontSize(11);
-  let y = 40;
-  const line = (label: string, value: string) => {
-    doc.setFont("helvetica", "normal");
-    doc.text(label, 14, y);
-    doc.setFont("helvetica", "bold");
-    doc.text(value, 140, y);
-    y += 8;
-  };
-  line("Employee", entry.employee?.profile?.full_name || "");
-  line("Pay Period", period ? `${period.start_date} - ${period.end_date}` : "");
-  y += 4;
-  doc.setDrawColor(200);
-  doc.line(14, y, 196, y);
-  y += 10;
-  line("Regular Hours", `${entry.regular_hours}`);
-  line("Overtime Hours", `${entry.overtime_hours}`);
-  line("Hourly Rate", `$$${Number(entry.hourly_rate).toFixed(2)}`);
-  y += 4;
-  doc.line(14, y, 196, y);
-  y += 10;
-  line("Gross Pay", `$$${Number(entry.gross_pay).toFixed(2)}`);
-  if (entry.allowances) line("Allowances", `$$${Number(entry.allowances).toFixed(2)}`);
-  line("FNPF (Employee)", `-$${Number(entry.fnpf_employee_contribution).toFixed(2)}`);
-  line("PAYE Tax", `-$${Number(entry.paye_tax).toFixed(2)}`);
-  if (entry.deductions) line("Other Deductions", `-$${Number(entry.deductions).toFixed(2)}`);
-  y += 4;
-  doc.line(14, y, 196, y);
-  y += 10;
-  doc.setFontSize(13);
-  line("Net Pay", `$$${Number(entry.net_pay).toFixed(2)}`);
-  return doc.output("datauristring").split(",")[1];
+function generatePayslipPdf(entry: any, tenant: any, period: any): string | null {
+  try {
+    const doc = new jsPDF();
+
+    doc.setFontSize(16);
+    doc.text("Payslip", 14, 18);
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text(tenant?.name || "", 14, 25);
+
+    doc.setTextColor(0);
+    doc.setFontSize(11);
+    let y = 40;
+    const line = (label: string, value: string) => {
+      doc.setFont("helvetica", "normal");
+      doc.text(label, 14, y);
+      doc.setFont("helvetica", "bold");
+      doc.text(value, 140, y);
+      y += 8;
+    };
+
+    line("Employee", entry.employee?.profile?.full_name || "");
+    line("Pay Period", period ? `${period.start_date} - ${period.end_date}` : "");
+    y += 4;
+    doc.setDrawColor(200);
+    doc.line(14, y, 196, y);
+    y += 10;
+
+    line("Regular Hours", `${entry.regular_hours}`);
+    line("Overtime Hours", `${entry.overtime_hours}`);
+    line("Hourly Rate", `$${Number(entry.hourly_rate).toFixed(2)}`);
+    y += 4;
+    doc.line(14, y, 196, y);
+    y += 10;
+
+    line("Gross Pay", `$${Number(entry.gross_pay).toFixed(2)}`);
+    if (entry.allowances) line("Allowances", `$${Number(entry.allowances).toFixed(2)}`);
+    line("FNPF (Employee)", `-$${Number(entry.fnpf_employee_contribution).toFixed(2)}`);
+    line("PAYE Tax", `-$${Number(entry.paye_tax).toFixed(2)}`);
+    if (entry.deductions) line("Other Deductions", `-$${Number(entry.deductions).toFixed(2)}`);
+    y += 4;
+    doc.line(14, y, 196, y);
+    y += 10;
+    doc.setFontSize(13);
+    line("Net Pay", `$${Number(entry.net_pay).toFixed(2)}`);
+
+    const dataUri = doc.output("datauristring");
+    const base64 = dataUri.split(",")[1];
+
+    if (!base64 || base64.length < 100) {
+      console.error("[Payslip API] PDF base64 too small or empty");
+      return null;
+    }
+
+    return base64;
+  } catch (err) {
+    console.error("[Payslip API] PDF generation failed:", err);
+    return null;
+  }
 }
 
 function decodeJwtPayload(token: string): { sub: string } | null {
@@ -122,15 +141,33 @@ export async function POST(request: NextRequest) {
   const validEntries = entries.filter((e: any) => e.employee?.profile?.email);
   const skipped = entries.length - validEntries.length;
 
+  let pdfFailures = 0;
+
   const batchPayload = validEntries.map((entry: any) => {
     const pdfBase64 = generatePayslipPdf(entry, tenant, run.pay_period);
-    return {
+
+    if (!pdfBase64) {
+      pdfFailures++;
+    }
+
+    const email: any = {
       from: `${tenant?.name || "KaiWorkforce"} <payroll@workforce.kaimasala.com>`,
       to: entry.employee.profile.email,
       subject: `Your Payslip — ${run.pay_period?.start_date} to ${run.pay_period?.end_date}`,
       html: `<p>Hi ${entry.employee.profile.full_name},</p><p>Your payslip for this pay period is attached.</p><p>Net pay: <strong>$${Number(entry.net_pay).toFixed(2)}</strong></p><p>— ${tenant?.name || "KaiWorkforce"}</p>`,
-      attachments: [{ filename: `payslip-${run.pay_period?.start_date}.pdf`, content: pdfBase64 }],
     };
+
+    // Only attach if PDF was generated successfully
+    if (pdfBase64) {
+      email.attachments = [
+        {
+          filename: "payslip.pdf",
+          content: pdfBase64,
+        },
+      ];
+    }
+
+    return email;
   });
 
   const res = await fetch("https://api.resend.com/emails/batch", {
@@ -159,5 +196,9 @@ export async function POST(request: NextRequest) {
     success: true,
     sent: validEntries.length,
     skipped,
+    pdfFailures: pdfFailures > 0 ? pdfFailures : undefined,
+    note: pdfFailures > 0
+      ? `${pdfFailures} payslip(s) sent without PDF attachment due to generation error.`
+      : undefined,
   });
 }
