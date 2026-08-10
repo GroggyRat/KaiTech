@@ -18,7 +18,7 @@ function decodeJwtPayload(token: string): { sub: string } | null {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { payrollRunId, attachments } = body;
+  const { payrollRunId, pdfLinks } = body;
 
   if (!payrollRunId) {
     return NextResponse.json({ error: "Missing payrollRunId" }, { status: 400 });
@@ -81,25 +81,34 @@ export async function POST(request: NextRequest) {
   const validEntries = entries.filter((e: any) => e.employee?.profile?.email);
   const skipped = entries.length - validEntries.length;
 
-  // Attachments come from the client (pre-generated PDFs)
-  const batchPayload = validEntries.map((entry: any, index: number) => {
-    const pdfBase64 = attachments?.[index];
-    
-    const email: any = {
+  // Build email batch with download links
+  const batchPayload = validEntries.map((entry: any) => {
+    const link = pdfLinks?.find((l: any) => l.employeeId === entry.employee_id);
+    const pdfUrl = link?.url || "";
+
+    return {
       from: `${tenant?.name || "KaiWorkforce"} <payroll@workforce.kaimasala.com>`,
       to: entry.employee.profile.email,
       subject: `Your Payslip — ${run.pay_period?.start_date} to ${run.pay_period?.end_date}`,
-      html: `<p>Hi ${entry.employee.profile.full_name},</p><p>Your payslip for this pay period is attached.</p><p>Net pay: <strong>$${Number(entry.net_pay).toFixed(2)}</strong></p><p>— ${tenant?.name || "KaiWorkforce"}</p>`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 500px;">
+          <h2 style="color: #333;">Hi ${entry.employee.profile.full_name},</h2>
+          <p>Your payslip for <strong>${run.pay_period?.start_date} to ${run.pay_period?.end_date}</strong> is ready.</p>
+
+          ${pdfUrl ? `
+          <p>
+            <a href="${pdfUrl}" 
+               style="display: inline-block; background: #0066cc; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+              Download Payslip PDF
+            </a>
+          </p>
+          <p style="font-size: 12px; color: #999; margin-top: 8px;">Link expires in 30 days</p>
+          ` : '<p style="color: #999;">PDF link unavailable. Contact your administrator.</p>'}
+          
+          <p style="margin-top: 24px; font-size: 12px; color: #999;">— ${tenant?.name || "KaiWorkforce"}</p>
+        </div>
+      `,
     };
-
-    if (pdfBase64) {
-      email.attachments = [{
-        filename: `payslip-${entry.employee?.profile?.full_name?.replace(/\s/g, "_") || index}.pdf`,
-        content: pdfBase64,
-      }];
-    }
-
-    return email;
   });
 
   const res = await fetch("https://api.resend.com/emails/batch", {
@@ -127,6 +136,5 @@ export async function POST(request: NextRequest) {
     success: true,
     sent: validEntries.length,
     skipped,
-    attachmentsIncluded: batchPayload.filter((e: any) => e.attachments).length,
   });
 }

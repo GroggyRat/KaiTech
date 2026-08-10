@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useTenant } from "@/lib/hooks/useTenant";
 import { createClient } from "@/lib/supabase/client";
 import { jsPDF } from "jspdf";
-import { Play, FileText, Download, AlertCircle } from "lucide-react";
+import { Play, FileText, Download, AlertCircle, Mail } from "lucide-react";
 import { formatCurrency, formatDate, calculatePAYE, calculateFNPF } from "@/lib/utils";
 import type { PayrollRun, PayrollEntry, PayPeriod, Employee, Timesheet } from "@/types";
 
@@ -25,7 +25,7 @@ export default function PayrollPage() {
     setPayslipMessage(null);
 
     try {
-      // 1. Fetch entries + run data
+      // Fetch data
       const { data: entriesData } = await supabase
         .from("payroll_entries")
         .select("*, employee:employees(profile:profiles(full_name, email))")
@@ -49,8 +49,9 @@ export default function PayrollPage() {
         return;
       }
 
-      // 2. Generate PDFs client-side where jspdf works
-      const attachments: string[] = [];
+      // Generate PDFs and upload to Supabase Storage
+      const pdfLinks: { employeeId: string; url: string }[] = [];
+
       for (const entry of entriesData) {
         const doc = new jsPDF();
         doc.setFontSize(16);
@@ -92,11 +93,39 @@ export default function PayrollPage() {
         doc.setFontSize(13);
         line("Net Pay", `$${Number(entry.net_pay).toFixed(2)}`);
 
-        const base64 = doc.output("datauristring").split(",")[1];
-        attachments.push(base64);
+        // Convert to blob and upload to Supabase Storage
+        const pdfBlob = doc.output("blob");
+        const fileName = `${tenant!.id}/${runId}/${entry.id}.pdf`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("payslips")
+          .upload(fileName, pdfBlob, {
+            contentType: "application/pdf",
+            upsert: true,
+          });
+
+        if (uploadError) {
+          console.error("Upload failed:", uploadError);
+          continue;
+        }
+
+        const { data: urlData } = supabase.storage
+          .from("payslips")
+          .getPublicUrl(fileName);
+
+        pdfLinks.push({
+          employeeId: entry.employee_id,
+          url: urlData.publicUrl,
+        });
       }
 
-      // 3. Get token via Supabase session
+      if (pdfLinks.length === 0) {
+        setPayslipMessage("Error: Failed to upload any payslips");
+        setIsSendingPayslips(false);
+        return;
+      }
+
+      // Get auth token
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
 
@@ -106,7 +135,7 @@ export default function PayrollPage() {
         return;
       }
 
-      // 4. Send to API with pre-generated PDFs
+      // Send links to API for emailing
       const res = await fetch("/api/payroll/send-payslips", {
         method: "POST",
         headers: {
@@ -115,7 +144,7 @@ export default function PayrollPage() {
         },
         body: JSON.stringify({
           payrollRunId: runId,
-          attachments,
+          pdfLinks,
         }),
       });
 
@@ -126,7 +155,7 @@ export default function PayrollPage() {
         setPayslipMessage(
           `Sent ${result.sent} payslip${result.sent === 1 ? "" : "s"} ` +
             (result.skipped > 0 ? ` (${result.skipped} skipped)` : "") +
-            (result.attachmentsIncluded ? ` — ${result.attachmentsIncluded} with PDF` : "")
+            ` — employees receive a download link`
         );
       }
     } catch (err: any) {
@@ -159,7 +188,6 @@ export default function PayrollPage() {
 
   const runPayroll = async (periodId: string) => {
     setIsRunning(true);
-
     const period = periods.find((p) => p.id === periodId);
     if (!period) {
       alert("Could not find this pay period.");
@@ -188,7 +216,7 @@ export default function PayrollPage() {
     }
 
     if (!timesheets || timesheets.length === 0) {
-      alert("No approved timesheets for this period. Approve timesheets before running payroll.");
+      alert("No approved timesheets for this period.");
       setIsRunning(false);
       return;
     }
@@ -287,9 +315,8 @@ export default function PayrollPage() {
 
   const generateBredBankFile = (run: PayrollRun) => {
     const bredEntries = entries.filter((e) => (e.employee as any)?.bank_name === "BRED");
-
     if (bredEntries.length === 0) {
-      alert("No employees with BRED bank on file for this payroll run.");
+      alert("No employees with BRED bank on file.");
       return;
     }
 
@@ -468,6 +495,7 @@ export default function PayrollPage() {
                 disabled={isSendingPayslips}
                 className="btn-primary text-xs"
               >
+                <Mail className="h-3 w-3 mr-1" />
                 {isSendingPayslips ? "Sending..." : "Send Payslips"}
               </button>
               <button onClick={() => generateBredBankFile(selectedRun)} className="btn-secondary text-xs">
