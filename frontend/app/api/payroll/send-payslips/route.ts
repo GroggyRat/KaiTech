@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "payrollRunId is required" }, { status: 400 });
     }
 
-    // ── 1. Fetch payroll run with all related data ─────────────────────
+    // ── 1. Fetch payroll run ───────────────────────────────────────────
     const { data: run, error: runError } = await supabase
       .from("payroll_runs")
       .select(`
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ── 2. Fetch payroll entries with employee + profile ───────────────
+    // ── 2. Fetch payroll entries ───────────────────────────────────────
     const { data: entries, error: entriesError } = await supabase
       .from("payroll_entries")
       .select(`
@@ -61,14 +61,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No entries found for this run" }, { status: 404 });
     }
 
-    // ── 3. Fetch payslip PDFs ─────────────────────────────────────────
+    // ── 3. Fetch payslip PDFs ────────────────────────────────────────
     const { data: payslips } = await supabase
       .from("payslips")
       .select("payroll_entry_id, pdf_url")
-      .in(
-        "payroll_entry_id",
-        entries.map((e: any) => e.id)
-      );
+      .in("payroll_entry_id", entries.map((e: any) => e.id));
 
     const payslipMap = new Map<string, string>();
     if (payslips) {
@@ -77,7 +74,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ── 4. Build batch email payload ───────────────────────────────────
+    // ── 4. Build emails ──────────────────────────────────────────────
     const payPeriod = Array.isArray(run.pay_periods) ? run.pay_periods[0] : run.pay_periods;
     const tenant = Array.isArray(run.tenants) ? run.tenants[0] : run.tenants;
 
@@ -88,24 +85,41 @@ export async function POST(request: NextRequest) {
 
     const batchPayload: any[] = [];
     const skipped: string[] = [];
+    const debugInfo: any[] = [];
 
     for (const entry of entries as any[]) {
       const email = entry.employee?.profile?.email;
       const fullName = entry.employee?.profile?.full_name || "Employee";
-      const pdfPath = payslipMap.get(entry.id);
+      const rawPdfUrl = payslipMap.get(entry.id);
 
       if (!email) {
         skipped.push(`Entry ${entry.id}: no email`);
         continue;
       }
 
-      // Generate a signed URL for the PDF (valid for 7 days)
+      // ── Resolve PDF URL ───────────────────────────────────────────
       let pdfUrl: string | null = null;
-      if (pdfPath) {
-        const { data: signedUrl } = await supabase.storage
-          .from("documents")
-          .createSignedUrl(pdfPath.replace(/^documents\//, ""), 60 * 60 * 24 * 7);
-        pdfUrl = signedUrl?.signedUrl ?? null;
+
+      if (rawPdfUrl) {
+        // Case 1: It's already a full URL (public or signed)
+        if (rawPdfUrl.startsWith("http")) {
+          pdfUrl = rawPdfUrl;
+        }
+        // Case 2: It's a storage path — create a signed URL
+        else {
+          // Strip any leading bucket name if present
+          const cleanPath = rawPdfUrl.replace(/^documents\//, "");
+          const { data: signed, error: signError } = await supabase.storage
+            .from("documents")
+            .createSignedUrl(cleanPath, 60 * 60 * 24 * 7); // 7 days
+
+          if (signError) {
+            console.error(`Sign URL error for entry ${entry.id}:`, signError.message);
+            debugInfo.push({ entryId: entry.id, error: signError.message, rawPath: rawPdfUrl });
+          } else {
+            pdfUrl = signed?.signedUrl ?? null;
+          }
+        }
       }
 
       const netPay = Number(entry.net_pay || 0).toFixed(2);
@@ -124,7 +138,7 @@ export async function POST(request: NextRequest) {
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
     <tr>
       <td align="center" style="padding:40px 16px;">
-        <table role="presentation" width="100%" max-width="560" style="max-width:560px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);">
+        <table role="presentation" width="100%" style="max-width:560px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);">
           <tr>
             <td style="background:${accentColor};padding:32px 32px 24px;text-align:center;">
               <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:600;letter-spacing:-0.3px;">${tenantName}</h1>
@@ -172,7 +186,7 @@ export async function POST(request: NextRequest) {
 </body>
 </html>`;
 
-      // ── Plain Text Fallback ────────────────────────────────────────
+      // ── Plain Text ─────────────────────────────────────────────────
       const text = `Hi ${fullName},
 
 Your payslip for ${periodStart} to ${periodEnd} is now available.
@@ -197,7 +211,7 @@ ${pdfUrl ? `Download your payslip: ${pdfUrl}` : "PDF link unavailable. Contact y
     // ── 5. Send via Resend ───────────────────────────────────────────
     if (batchPayload.length === 0) {
       return NextResponse.json(
-        { error: "No valid recipients found", skipped },
+        { error: "No valid recipients found", skipped, debug: debugInfo },
         { status: 400 }
       );
     }
@@ -231,7 +245,7 @@ ${pdfUrl ? `Download your payslip: ${pdfUrl}` : "PDF link unavailable. Contact y
       success: true,
       sent: batchPayload.length,
       skipped,
-      resendResponse: result,
+      debug: debugInfo,
     });
   } catch (err: any) {
     console.error("Send payslips error:", err);
