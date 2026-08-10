@@ -1,64 +1,87 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { jsPDF } from "jspdf";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
-function generatePayslipPdf(entry: any, tenant: any, period: any): string | null {
+async function generatePayslipPdf(entry: any, tenant: any, period: any): Promise<string | null> {
   try {
-    const doc = new jsPDF();
+    const pdfDoc = await PDFDocument.create();
+    const page = pdfDoc.addPage([612, 792]); // US Letter
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-    doc.setFontSize(16);
-    doc.text("Payslip", 14, 18);
-    doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text(tenant?.name || "", 14, 25);
+    const { width, height } = page.getSize();
+    let y = height - 50;
 
-    doc.setTextColor(0);
-    doc.setFontSize(11);
-    let y = 40;
+    const drawText = (text: string, x: number, size: number, isBold = false, color = rgb(0, 0, 0)) => {
+      page.drawText(text, {
+        x,
+        y,
+        size,
+        font: isBold ? boldFont : font,
+        color,
+      });
+    };
+
+    // Header
+    drawText("Payslip", 50, 24, true);
+    y -= 30;
+    drawText(tenant?.name || "", 50, 10, false, rgb(0.4, 0.4, 0.4));
+    y -= 40;
+
     const line = (label: string, value: string) => {
-      doc.setFont("helvetica", "normal");
-      doc.text(label, 14, y);
-      doc.setFont("helvetica", "bold");
-      doc.text(value, 140, y);
-      y += 8;
+      drawText(label, 50, 11);
+      drawText(value, 350, 11, true);
+      y -= 18;
     };
 
     line("Employee", entry.employee?.profile?.full_name || "");
     line("Pay Period", period ? `${period.start_date} - ${period.end_date}` : "");
-    y += 4;
-    doc.setDrawColor(200);
-    doc.line(14, y, 196, y);
-    y += 10;
+    y -= 10;
+
+    // Separator
+    page.drawLine({
+      start: { x: 50, y },
+      end: { x: width - 50, y },
+      thickness: 1,
+      color: rgb(0.8, 0.8, 0.8),
+    });
+    y -= 20;
 
     line("Regular Hours", `${entry.regular_hours}`);
     line("Overtime Hours", `${entry.overtime_hours}`);
     line("Hourly Rate", `$${Number(entry.hourly_rate).toFixed(2)}`);
-    y += 4;
-    doc.line(14, y, 196, y);
-    y += 10;
+    y -= 10;
+
+    page.drawLine({
+      start: { x: 50, y },
+      end: { x: width - 50, y },
+      thickness: 1,
+      color: rgb(0.8, 0.8, 0.8),
+    });
+    y -= 20;
 
     line("Gross Pay", `$${Number(entry.gross_pay).toFixed(2)}`);
     if (entry.allowances) line("Allowances", `$${Number(entry.allowances).toFixed(2)}`);
     line("FNPF (Employee)", `-$${Number(entry.fnpf_employee_contribution).toFixed(2)}`);
     line("PAYE Tax", `-$${Number(entry.paye_tax).toFixed(2)}`);
     if (entry.deductions) line("Other Deductions", `-$${Number(entry.deductions).toFixed(2)}`);
-    y += 4;
-    doc.line(14, y, 196, y);
-    y += 10;
-    doc.setFontSize(13);
-    line("Net Pay", `$${Number(entry.net_pay).toFixed(2)}`);
+    y -= 10;
 
-    // FIX: Use arraybuffer + Buffer instead of datauristring (unreliable in Node.js)
-    const arrayBuffer = doc.output("arraybuffer");
-    const base64 = Buffer.from(arrayBuffer).toString("base64");
+    page.drawLine({
+      start: { x: 50, y },
+      end: { x: width - 50, y },
+      thickness: 1,
+      color: rgb(0.8, 0.8, 0.8),
+    });
+    y -= 25;
 
-    console.log("[Payslip API] PDF generated, size:", base64.length, "chars");
+    drawText("Net Pay", 50, 14, true);
+    drawText(`$${Number(entry.net_pay).toFixed(2)}`, 350, 14, true);
 
-    if (!base64 || base64.length < 100) {
-      console.error("[Payslip API] PDF base64 too small");
-      return null;
-    }
+    const pdfBytes = await pdfDoc.save();
+    const base64 = Buffer.from(pdfBytes).toString("base64");
 
+    console.log("[Payslip API] PDF generated with pdf-lib, size:", base64.length);
     return base64;
   } catch (err) {
     console.error("[Payslip API] PDF generation failed:", err);
@@ -146,32 +169,33 @@ export async function POST(request: NextRequest) {
 
   let pdfFailures = 0;
 
-  const batchPayload = validEntries.map((entry: any) => {
-    const pdfBase64 = generatePayslipPdf(entry, tenant, run.pay_period);
+  const batchPayload = await Promise.all(
+    validEntries.map(async (entry: any) => {
+      const pdfBase64 = await generatePayslipPdf(entry, tenant, run.pay_period);
 
-    if (!pdfBase64) {
-      pdfFailures++;
-      console.error("[Payslip API] PDF failed for:", entry.employee?.profile?.full_name);
-    }
+      if (!pdfBase64) {
+        pdfFailures++;
+      }
 
-    const email: any = {
-      from: `${tenant?.name || "KaiWorkforce"} <payroll@workforce.kaimasala.com>`,
-      to: entry.employee.profile.email,
-      subject: `Your Payslip — ${run.pay_period?.start_date} to ${run.pay_period?.end_date}`,
-      html: `<p>Hi ${entry.employee.profile.full_name},</p><p>Your payslip for this pay period is attached.</p><p>Net pay: <strong>$${Number(entry.net_pay).toFixed(2)}</strong></p><p>— ${tenant?.name || "KaiWorkforce"}</p>`,
-    };
+      const email: any = {
+        from: `${tenant?.name || "KaiWorkforce"} <payroll@workforce.kaimasala.com>`,
+        to: entry.employee.profile.email,
+        subject: `Your Payslip — ${run.pay_period?.start_date} to ${run.pay_period?.end_date}`,
+        html: `<p>Hi ${entry.employee.profile.full_name},</p><p>Your payslip for this pay period is attached.</p><p>Net pay: <strong>$${Number(entry.net_pay).toFixed(2)}</strong></p><p>— ${tenant?.name || "KaiWorkforce"}</p>`,
+      };
 
-    if (pdfBase64) {
-      email.attachments = [
-        {
-          filename: "payslip.pdf",
-          content: pdfBase64,
-        },
-      ];
-    }
+      if (pdfBase64) {
+        email.attachments = [
+          {
+            filename: "payslip.pdf",
+            content: pdfBase64,
+          },
+        ];
+      }
 
-    return email;
-  });
+      return email;
+    })
+  );
 
   console.log("[Payslip API] Sending batch, attachments:", batchPayload.filter((e: any) => e.attachments).length, "/", batchPayload.length);
 
