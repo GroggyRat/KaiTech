@@ -48,11 +48,14 @@ function generatePayslipPdf(entry: any, tenant: any, period: any): string | null
     doc.setFontSize(13);
     line("Net Pay", `$${Number(entry.net_pay).toFixed(2)}`);
 
-    const dataUri = doc.output("datauristring");
-    const base64 = dataUri.split(",")[1];
+    // FIX: Use arraybuffer + Buffer instead of datauristring (unreliable in Node.js)
+    const arrayBuffer = doc.output("arraybuffer");
+    const base64 = Buffer.from(arrayBuffer).toString("base64");
+
+    console.log("[Payslip API] PDF generated, size:", base64.length, "chars");
 
     if (!base64 || base64.length < 100) {
-      console.error("[Payslip API] PDF base64 too small or empty");
+      console.error("[Payslip API] PDF base64 too small");
       return null;
     }
 
@@ -148,6 +151,7 @@ export async function POST(request: NextRequest) {
 
     if (!pdfBase64) {
       pdfFailures++;
+      console.error("[Payslip API] PDF failed for:", entry.employee?.profile?.full_name);
     }
 
     const email: any = {
@@ -157,7 +161,6 @@ export async function POST(request: NextRequest) {
       html: `<p>Hi ${entry.employee.profile.full_name},</p><p>Your payslip for this pay period is attached.</p><p>Net pay: <strong>$${Number(entry.net_pay).toFixed(2)}</strong></p><p>— ${tenant?.name || "KaiWorkforce"}</p>`,
     };
 
-    // Only attach if PDF was generated successfully
     if (pdfBase64) {
       email.attachments = [
         {
@@ -169,6 +172,8 @@ export async function POST(request: NextRequest) {
 
     return email;
   });
+
+  console.log("[Payslip API] Sending batch, attachments:", batchPayload.filter((e: any) => e.attachments).length, "/", batchPayload.length);
 
   const res = await fetch("https://api.resend.com/emails/batch", {
     method: "POST",
