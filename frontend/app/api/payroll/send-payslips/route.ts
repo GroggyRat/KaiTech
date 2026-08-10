@@ -1,93 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-
-async function generatePayslipPdf(entry: any, tenant: any, period: any): Promise<string | null> {
-  try {
-    const pdfDoc = await PDFDocument.create();
-    const page = pdfDoc.addPage([612, 792]); // US Letter
-    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-
-    const { width, height } = page.getSize();
-    let y = height - 50;
-
-    const drawText = (text: string, x: number, size: number, isBold = false, color = rgb(0, 0, 0)) => {
-      page.drawText(text, {
-        x,
-        y,
-        size,
-        font: isBold ? boldFont : font,
-        color,
-      });
-    };
-
-    // Header
-    drawText("Payslip", 50, 24, true);
-    y -= 30;
-    drawText(tenant?.name || "", 50, 10, false, rgb(0.4, 0.4, 0.4));
-    y -= 40;
-
-    const line = (label: string, value: string) => {
-      drawText(label, 50, 11);
-      drawText(value, 350, 11, true);
-      y -= 18;
-    };
-
-    line("Employee", entry.employee?.profile?.full_name || "");
-    line("Pay Period", period ? `${period.start_date} - ${period.end_date}` : "");
-    y -= 10;
-
-    // Separator
-    page.drawLine({
-      start: { x: 50, y },
-      end: { x: width - 50, y },
-      thickness: 1,
-      color: rgb(0.8, 0.8, 0.8),
-    });
-    y -= 20;
-
-    line("Regular Hours", `${entry.regular_hours}`);
-    line("Overtime Hours", `${entry.overtime_hours}`);
-    line("Hourly Rate", `$${Number(entry.hourly_rate).toFixed(2)}`);
-    y -= 10;
-
-    page.drawLine({
-      start: { x: 50, y },
-      end: { x: width - 50, y },
-      thickness: 1,
-      color: rgb(0.8, 0.8, 0.8),
-    });
-    y -= 20;
-
-    line("Gross Pay", `$${Number(entry.gross_pay).toFixed(2)}`);
-    if (entry.allowances) line("Allowances", `$${Number(entry.allowances).toFixed(2)}`);
-    line("FNPF (Employee)", `-$${Number(entry.fnpf_employee_contribution).toFixed(2)}`);
-    line("PAYE Tax", `-$${Number(entry.paye_tax).toFixed(2)}`);
-    if (entry.deductions) line("Other Deductions", `-$${Number(entry.deductions).toFixed(2)}`);
-    y -= 10;
-
-    page.drawLine({
-      start: { x: 50, y },
-      end: { x: width - 50, y },
-      thickness: 1,
-      color: rgb(0.8, 0.8, 0.8),
-    });
-    y -= 25;
-
-    drawText("Net Pay", 50, 14, true);
-    drawText(`$${Number(entry.net_pay).toFixed(2)}`, 350, 14, true);
-
-    const pdfBytes = await pdfDoc.save();
-    const base64 = Buffer.from(pdfBytes).toString("base64");
-
-    console.log("[Payslip API] PDF generated with pdf-lib, size:", base64.length);
-    return base64;
-  } catch (err) {
-    console.error("[Payslip API] PDF generation failed:", err);
-    return null;
-  }
-}
 
 function decodeJwtPayload(token: string): { sub: string } | null {
   try {
@@ -105,7 +17,9 @@ function decodeJwtPayload(token: string): { sub: string } | null {
 }
 
 export async function POST(request: NextRequest) {
-  const { payrollRunId } = await request.json();
+  const body = await request.json();
+  const { payrollRunId, attachments } = body;
+
   if (!payrollRunId) {
     return NextResponse.json({ error: "Missing payrollRunId" }, { status: 400 });
   }
@@ -151,7 +65,7 @@ export async function POST(request: NextRequest) {
 
   const { data: tenant } = await admin
     .from("tenants")
-    .select("name, logo_url, accent_color")
+    .select("name")
     .eq("id", run.tenant_id)
     .single();
 
@@ -161,43 +75,32 @@ export async function POST(request: NextRequest) {
     .eq("payroll_run_id", payrollRunId);
 
   if (!entries || entries.length === 0) {
-    return NextResponse.json({ error: "No payroll entries found for this run" }, { status: 404 });
+    return NextResponse.json({ error: "No payroll entries found" }, { status: 404 });
   }
 
   const validEntries = entries.filter((e: any) => e.employee?.profile?.email);
   const skipped = entries.length - validEntries.length;
 
-  let pdfFailures = 0;
+  // Attachments come from the client (pre-generated PDFs)
+  const batchPayload = validEntries.map((entry: any, index: number) => {
+    const pdfBase64 = attachments?.[index];
+    
+    const email: any = {
+      from: `${tenant?.name || "KaiWorkforce"} <payroll@workforce.kaimasala.com>`,
+      to: entry.employee.profile.email,
+      subject: `Your Payslip — ${run.pay_period?.start_date} to ${run.pay_period?.end_date}`,
+      html: `<p>Hi ${entry.employee.profile.full_name},</p><p>Your payslip for this pay period is attached.</p><p>Net pay: <strong>$${Number(entry.net_pay).toFixed(2)}</strong></p><p>— ${tenant?.name || "KaiWorkforce"}</p>`,
+    };
 
-  const batchPayload = await Promise.all(
-    validEntries.map(async (entry: any) => {
-      const pdfBase64 = await generatePayslipPdf(entry, tenant, run.pay_period);
+    if (pdfBase64) {
+      email.attachments = [{
+        filename: `payslip-${entry.employee?.profile?.full_name?.replace(/\s/g, "_") || index}.pdf`,
+        content: pdfBase64,
+      }];
+    }
 
-      if (!pdfBase64) {
-        pdfFailures++;
-      }
-
-      const email: any = {
-        from: `${tenant?.name || "KaiWorkforce"} <payroll@workforce.kaimasala.com>`,
-        to: entry.employee.profile.email,
-        subject: `Your Payslip — ${run.pay_period?.start_date} to ${run.pay_period?.end_date}`,
-        html: `<p>Hi ${entry.employee.profile.full_name},</p><p>Your payslip for this pay period is attached.</p><p>Net pay: <strong>$${Number(entry.net_pay).toFixed(2)}</strong></p><p>— ${tenant?.name || "KaiWorkforce"}</p>`,
-      };
-
-      if (pdfBase64) {
-        email.attachments = [
-          {
-            filename: "payslip.pdf",
-            content: pdfBase64,
-          },
-        ];
-      }
-
-      return email;
-    })
-  );
-
-  console.log("[Payslip API] Sending batch, attachments:", batchPayload.filter((e: any) => e.attachments).length, "/", batchPayload.length);
+    return email;
+  });
 
   const res = await fetch("https://api.resend.com/emails/batch", {
     method: "POST",
@@ -217,17 +120,13 @@ export async function POST(request: NextRequest) {
   }
 
   if (!res.ok) {
-    const errorMsg = result?.message || result?.error || `Resend error (${res.status})`;
-    return NextResponse.json({ error: errorMsg }, { status: 502 });
+    return NextResponse.json({ error: result?.message || "Failed to send" }, { status: 502 });
   }
 
   return NextResponse.json({
     success: true,
     sent: validEntries.length,
     skipped,
-    pdfFailures: pdfFailures > 0 ? pdfFailures : undefined,
-    note: pdfFailures > 0
-      ? `${pdfFailures} payslip(s) sent without PDF attachment due to generation error.`
-      : undefined,
+    attachmentsIncluded: batchPayload.filter((e: any) => e.attachments).length,
   });
 }

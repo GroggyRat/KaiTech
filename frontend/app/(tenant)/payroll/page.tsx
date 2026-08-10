@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useTenant } from "@/lib/hooks/useTenant";
 import { createClient } from "@/lib/supabase/client";
+import { jsPDF } from "jspdf";
 import { Play, FileText, Download, AlertCircle } from "lucide-react";
 import { formatCurrency, formatDate, calculatePAYE, calculateFNPF } from "@/lib/utils";
 import type { PayrollRun, PayrollEntry, PayPeriod, Employee, Timesheet } from "@/types";
@@ -16,30 +17,121 @@ export default function PayrollPage() {
   const [isRunning, setIsRunning] = useState(false);
   const [isSendingPayslips, setIsSendingPayslips] = useState(false);
   const [payslipMessage, setPayslipMessage] = useState<string | null>(null);
+  const [showRunDetails, setShowRunDetails] = useState<string | null>(null);
+  const supabase = createClient();
 
-    const handleSendPayslips = async (runId: string) => {
+  const handleSendPayslips = async (runId: string) => {
     setIsSendingPayslips(true);
     setPayslipMessage(null);
-    try {
-      // Get the current session token
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
 
+    try {
+      // 1. Fetch entries + run data
+      const { data: entriesData } = await supabase
+        .from("payroll_entries")
+        .select("*, employee:employees(profile:profiles(full_name, email))")
+        .eq("payroll_run_id", runId);
+
+      const { data: runData } = await supabase
+        .from("payroll_runs")
+        .select("*, pay_period:pay_periods(start_date, end_date)")
+        .eq("id", runId)
+        .single();
+
+      const { data: tenantData } = await supabase
+        .from("tenants")
+        .select("name")
+        .eq("id", tenant!.id)
+        .single();
+
+      if (!entriesData || entriesData.length === 0) {
+        setPayslipMessage("Error: No entries found");
+        setIsSendingPayslips(false);
+        return;
+      }
+
+      // 2. Generate PDFs client-side where jspdf works
+      const attachments: string[] = [];
+      for (const entry of entriesData) {
+        const doc = new jsPDF();
+        doc.setFontSize(16);
+        doc.text("Payslip", 14, 18);
+        doc.setFontSize(10);
+        doc.setTextColor(100);
+        doc.text(tenantData?.name || "", 14, 25);
+        doc.setTextColor(0);
+        doc.setFontSize(11);
+        let y = 40;
+        const line = (label: string, value: string) => {
+          doc.setFont("helvetica", "normal");
+          doc.text(label, 14, y);
+          doc.setFont("helvetica", "bold");
+          doc.text(value, 140, y);
+          y += 8;
+        };
+
+        line("Employee", entry.employee?.profile?.full_name || "");
+        line("Pay Period", `${runData?.pay_period?.start_date} - ${runData?.pay_period?.end_date}`);
+        y += 4;
+        doc.setDrawColor(200);
+        doc.line(14, y, 196, y);
+        y += 10;
+        line("Regular Hours", `${entry.regular_hours}`);
+        line("Overtime Hours", `${entry.overtime_hours}`);
+        line("Hourly Rate", `$${Number(entry.hourly_rate).toFixed(2)}`);
+        y += 4;
+        doc.line(14, y, 196, y);
+        y += 10;
+        line("Gross Pay", `$${Number(entry.gross_pay).toFixed(2)}`);
+        if (entry.allowances) line("Allowances", `$${Number(entry.allowances).toFixed(2)}`);
+        line("FNPF (Employee)", `-$${Number(entry.fnpf_employee_contribution).toFixed(2)}`);
+        line("PAYE Tax", `-$${Number(entry.paye_tax).toFixed(2)}`);
+        if (entry.deductions) line("Other Deductions", `-$${Number(entry.deductions).toFixed(2)}`);
+        y += 4;
+        doc.line(14, y, 196, y);
+        y += 10;
+        doc.setFontSize(13);
+        line("Net Pay", `$${Number(entry.net_pay).toFixed(2)}`);
+
+        const base64 = doc.output("datauristring").split(",")[1];
+        attachments.push(base64);
+      }
+
+      // 3. Get auth token
+      const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL
+        ?.replace("https://", "")
+        ?.split(".")[0];
+      const raw = localStorage.getItem(`sb-${projectRef}-auth-token`);
+      let token: string | null = null;
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          token = parsed[0];
+        } catch {
+          token = null;
+        }
+      }
+
+      // 4. Send to API with pre-generated PDFs
       const res = await fetch("/api/payroll/send-payslips", {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
-          ...(token ? { "Authorization": `Bearer ${token}` } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ payrollRunId: runId }),
+        body: JSON.stringify({
+          payrollRunId: runId,
+          attachments,
+        }),
       });
+
       const result = await res.json();
       if (!res.ok) {
         setPayslipMessage(`Error: ${result.error || "Failed to send payslips"}`);
       } else {
         setPayslipMessage(
           `Sent ${result.sent} payslip${result.sent === 1 ? "" : "s"} ` +
-            (result.skipped > 0 ? ` (${result.skipped} skipped — no email on file)` : "")
+            (result.skipped > 0 ? ` (${result.skipped} skipped)` : "") +
+            (result.attachmentsIncluded ? ` — ${result.attachmentsIncluded} with PDF` : "")
         );
       }
     } catch (err: any) {
@@ -47,9 +139,6 @@ export default function PayrollPage() {
     }
     setIsSendingPayslips(false);
   };
-
-  const [showRunDetails, setShowRunDetails] = useState<string | null>(null);
-  const supabase = createClient();
 
   useEffect(() => {
     if (!tenant) return;
