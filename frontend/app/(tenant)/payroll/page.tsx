@@ -96,19 +96,14 @@ export default function PayrollPage() {
         attachments.push(base64);
       }
 
-      // 3. Get auth token
-      const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL
-        ?.replace("https://", "")
-        ?.split(".")[0];
-      const raw = localStorage.getItem(`sb-${projectRef}-auth-token`);
-      let token: string | null = null;
-      if (raw) {
-        try {
-          const parsed = JSON.parse(raw);
-          token = parsed[0];
-        } catch {
-          token = null;
-        }
+      // 3. Get token via Supabase session
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      if (!token) {
+        setPayslipMessage("Error: Not authenticated");
+        setIsSendingPayslips(false);
+        return;
       }
 
       // 4. Send to API with pre-generated PDFs
@@ -116,7 +111,7 @@ export default function PayrollPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           payrollRunId: runId,
